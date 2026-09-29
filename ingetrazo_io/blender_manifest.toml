@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "ingetrazo_io"
+version = "0.1.0"
+name = "IngeTrazo (.igz)"
+tagline = "Import IngeTrazo documents and reload them when they change"
+maintainer = "Victor"
+type = "add-on"
+
+blender_version_min = "5.0.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Import-Export"]
+
+[permissions]
+files = "Read .igz documents and extract their embedded textures"
