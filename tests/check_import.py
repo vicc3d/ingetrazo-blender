@@ -65,5 +65,44 @@ for path in docs:
           f"{path.name}: reload left orphan meshes")
     print(f"{path.name}: {stats}")
 
+# A saved view renamed in IngeTrazo renames its camera on reload.
+import json  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+import zipfile  # noqa: E402
+
+for path in docs:
+    probe = ingetrazo_io.igz.Document(path)
+    has_views = bool(probe.scene.get("saved_views"))
+    probe.close()
+    if not has_views:
+        continue
+    tmp = Path(tempfile.mkdtemp()) / path.name
+    shutil.copy(path, tmp)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(tmp))
+
+    def rename_first_view(doc: dict) -> None:
+        doc["scene"]["saved_views"][0]["name"] = "Renamed view"
+    raw = tmp.read_bytes()
+    if raw.startswith(b"PK"):
+        with zipfile.ZipFile(tmp) as zf:
+            members = {n: zf.read(n) for n in zf.namelist()}
+        doc = json.loads(members["document.json"])
+        rename_first_view(doc)
+        members["document.json"] = json.dumps(doc).encode()
+        with zipfile.ZipFile(tmp, "w") as zf:
+            for n, data in members.items():
+                zf.writestr(n, data)
+    else:
+        doc = json.loads(raw)
+        rename_first_view(doc)
+        tmp.write_text(json.dumps(doc))
+    bpy.ops.ingetrazo.reload(filepath=str(tmp))
+    cams = [o.name for o in bpy.data.objects if o.type == "CAMERA"]
+    check("Renamed view" in cams, f"{path.name}: renamed view not renamed ({cams})")
+    print(f"{path.name}: view rename -> {cams}")
+    break
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

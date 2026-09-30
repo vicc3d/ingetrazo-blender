@@ -508,6 +508,11 @@ class Builder:
                 obj[DOC_PROP] = self.doc_path
                 obj[KEY_PROP] = key
                 coll.objects.link(obj)
+            else:
+                # A view renamed (or deleted and made again) in IngeTrazo
+                # keeps its slot: the camera must take the new name too.
+                obj.name = _short(name)
+                obj.data.name = _short(name)
             self._aim(obj, v)
             first = first or obj
         # The author's camera, else the first saved view, frames the render
