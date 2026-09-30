@@ -67,6 +67,7 @@ class Builder:
         registry = self.scene_json.get("materials", []) or []
         self.registry = {m.get("name"): m for m in registry if isinstance(m, dict)}
         self.stats = {"objects": 0, "faces": 0, "components": 0}
+        self.facing: list = []
 
     # ---- Collections -------------------------------------------------------
     def root_collection(self):
@@ -366,10 +367,23 @@ class Builder:
                 mjson = {}
         else:
             mjson = g
-        me = self.mesh(mjson, wear, name) if mjson.get("faces") or mjson.get("edges") else None
-        if me is not None and not me.polygons and not me.edges:
-            me = None
+        billboard = g.get("billboard")
         matrix = igz.matrix_from_column_major(g["xform"]) if g.get("xform") else None
+        if billboard is True:
+            me, local = self.faceme_card(mjson, wear, name)
+        else:
+            me = self.mesh(mjson, wear, name) if mjson.get("faces") or mjson.get("edges") else None
+            if me is not None and not me.polygons and not me.edges:
+                me = None
+            local = None
+            if me is not None and (matrix is None or billboard):
+                # A classic group's mesh sits in world coordinates: give the
+                # object its own origin (the bottom centre of the box, where
+                # SketchUp puts a group's axes) so it rotates and scales in
+                # place; a face-me also turns its sheet to face −Y.
+                local = self.recentre(me, turn=bool(billboard))
+        if local is not None:
+            matrix = (Matrix(matrix) if matrix is not None else Matrix.Identity(4)) @ local
         coll = self.tag_collection(root, g.get("layer"))
         obj = self.place(key, name, me, coll, parent, matrix, name_key)
         if g.get("component", "proto" in g) and "proto" in g:
@@ -378,11 +392,64 @@ class Builder:
         hidden = bool(g.get("hidden"))
         obj.hide_viewport = hidden
         obj.hide_render = hidden
-        if g.get("billboard"):
-            obj["ingetrazo_billboard"] = str(g["billboard"])
+        if billboard:
+            obj["ingetrazo_billboard"] = str(billboard)
+            self.facing.append(obj)
         for i, child, nk in self._named(g.get("children", []) or [], name_key or key):
             self.group(child, f"{key}/{child.get('uid') or i}", root, obj, wear, nk)
         return obj
+
+    def recentre(self, me, turn: bool = False):
+        """Move ``me``'s origin to the bottom centre of its bounding box
+        (turning a face-me sheet so its front looks down −Y) and return the
+        matrix that puts it back where it was. ``None`` for a shared mesh
+        (component copies keep the component's own origin)."""
+        if me.users or not me.vertices:
+            return None
+        xs = [v.co.x for v in me.vertices]
+        ys = [v.co.y for v in me.vertices]
+        zs = [v.co.z for v in me.vertices]
+        anchor = Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, min(zs)))
+        m = Matrix.Translation(anchor)
+        if turn:
+            n = Vector((0.0, 0.0, 0.0))
+            for poly in me.polygons:
+                n += poly.normal * poly.area
+            n.z = 0.0
+            if n.length > 1e-9:
+                n.normalize()
+                # R_z(phi) takes the sheet's −Y front onto the face normal.
+                m = m @ Matrix.Rotation(math.atan2(n.x, -n.y), 4, "Z")
+        me.transform(m.inverted())
+        me.update()
+        return m
+
+    def faceme_card(self, mjson: dict, container, name: str):
+        """A textured face-me figure (SketchUp's 2D people): IngeTrazo draws
+        the image ONCE over the card's box, turned toward the camera. Built
+        the same way here — a card on the local XZ plane facing −Y, UVs 0..1,
+        origin at its foot — and the Locked Track added in :meth:`build`
+        keeps it turned to the scene camera."""
+        pts = [tuple(p) for f in mjson.get("faces", []) or [] for p in f.get("vertices", [])]
+        face = next((f for f in mjson.get("faces", []) or []
+                     if isinstance(f.get("texture"), dict)), None)
+        if not pts or face is None:
+            me = self.mesh(mjson, container, name)
+            return me, self.recentre(me, turn=True)
+        xs, ys, zs = zip(*pts)
+        w = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        h = max(zs) - min(zs)
+        anchor = Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, min(zs)))
+        me = bpy.data.meshes.new(_short(name))
+        me.from_pydata([(-w / 2, 0, 0), (w / 2, 0, 0), (w / 2, 0, h), (-w / 2, 0, h)],
+                       [], [(0, 1, 2, 3)])
+        me.materials.append(self.material(igz.effective_attrs(face, container)))
+        uv = me.uv_layers.new(name="UVMap")
+        uv.data.foreach_set("uv", [0, 0, 1, 0, 1, 1, 0, 1])
+        me.update()
+        me[DOC_PROP] = self.doc_path
+        self.stats["faces"] += 1
+        return me, Matrix.Translation(anchor)
 
     @staticmethod
     def _named(groups, prefix):
@@ -505,6 +572,16 @@ class Builder:
         for i, g, nk in self._named(s.get("groups", []) or [], "g"):
             self.group(g, f"g/{g.get('uid') or i}", root, name_key=nk)
         self.cameras(root)
+        # Face-me figures turn to the scene camera about their vertical axis.
+        cam = self.context.scene.camera
+        for obj in self.facing:
+            con = obj.constraints.get("IngeTrazo face-me") or \
+                obj.constraints.new("LOCKED_TRACK")
+            con.name = "IngeTrazo face-me"
+            con.track_axis = "TRACK_NEGATIVE_Y"
+            con.lock_axis = "LOCK_Z"
+            if con.target is None:
+                con.target = cam
         # Tags: hidden in IngeTrazo → hidden here too.
         for ly in s.get("layers", []) or []:
             if isinstance(ly, dict) and ly.get("visible") is False:
