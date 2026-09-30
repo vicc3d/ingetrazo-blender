@@ -1,18 +1,20 @@
 """Headless check of the add-on inside a real Blender:
 
-    blender -b --factory-startup --python blender/tests/check_import.py
+    blender -b --factory-startup --python tests/check_import.py -- <folder>
 
-Imports every example document, checks the scene it builds (objects,
+``<folder>`` holds .igz documents (default: ``$INGETRAZO_SRC/examples``, the
+examples of an IngeTrazo checkout). Imports every document, checks the scene it builds (objects,
 shared component meshes, materials, cameras) and that a reload updates in
 place without duplicating anything. Exits non-zero on failure.
 """
+import os
 import sys
 from pathlib import Path
 
 import bpy
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "blender"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 import ingetrazo_io  # noqa: E402
 from ingetrazo_io import build, igz  # noqa: E402,F401
 
@@ -26,7 +28,13 @@ def check(cond, msg):
         print("FAIL:", msg)
 
 
-for path in sorted((ROOT / "examples").glob("*.igz")):
+args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+folder = Path(args[0]) if args else Path(os.environ.get("INGETRAZO_SRC", ".")) / "examples"
+docs = sorted(folder.glob("*.igz"))
+if not docs:
+    print(f"no .igz documents in {folder}")
+    sys.exit(2)
+for path in docs:
     bpy.ops.wm.read_factory_settings(use_empty=True)
     stats = build.import_igz(bpy.context, str(path))
     ours = [o for o in bpy.data.objects if o.get(build.DOC_PROP)]

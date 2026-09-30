@@ -1,42 +1,78 @@
 # IngeTrazo → Blender
 
-A Blender 5 extension that imports IngeTrazo documents (`.igz`) and reloads
-them when they change. No network: the bridge is the file.
+A Blender 5 extension that imports [IngeTrazo](https://github.com/ingelibre/ingetrazo)
+documents (`.igz`) **with their structure** and reloads them when they
+change, so a model drawn in IngeTrazo can be lit, textured and rendered in
+Blender while you keep modelling in IngeTrazo.
 
-**Install:** in Blender, Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸
-*Install from Disk…* and pick `ingetrazo_io-<version>.zip`.
+It complements IngeTrazo's own *Render with Blender* tab (which renders
+from inside IngeTrazo): this one works from inside Blender, keeps groups,
+components and tags, and updates the scene in place on every save.
 
-**Use:** File ▸ Import ▸ IngeTrazo (.igz). The *IngeTrazo* tab of the 3D
-view's sidebar (N) reloads a document after you save it again in IngeTrazo
-— with the Reload button, or automatically with *Reload when the file
-changes*. A reload updates what came from the file (geometry, placements,
-new and deleted groups) and keeps what you added in Blender: lights, your
-own cameras, modifiers and the materials you edited (the material button
-next to Reload overwrites those too).
+No network, no server: the bridge is the `.igz` file itself.
 
-What comes across:
+> Independent project, not affiliated with IngeTrazo's maintainers.
+
+## Install
+
+1. Download `ingetrazo_io-<version>.zip` from the
+   [Releases](../../releases) page (or build it, below).
+2. In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…**
+   and pick the zip.
+
+Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
+
+## Use
+
+- **File ▸ Import ▸ IngeTrazo (.igz)**.
+- The **IngeTrazo** tab of the 3D view's sidebar (N) reloads a document after
+  you save it again in IngeTrazo — with **Reload**, or automatically with
+  **Reload when the file changes**.
+- A reload updates what came from the file (geometry, placements, new and
+  deleted groups) and keeps what you added in Blender: lights, your own
+  cameras, modifiers and the materials you edited. The material button next
+  to Reload overwrites those materials too.
+
+## What comes across
 
 | IngeTrazo | Blender |
 |---|---|
 | document | a collection named after the file |
 | tags (layers) | child collections, hidden if the tag was hidden |
-| groups, nested groups | objects, parented as they nest |
+| groups, nested groups | objects, parented as they nest, origin at the base of their box |
 | component copies | linked duplicates sharing one mesh |
 | faces | polygons as drawn; faces with holes are triangulated |
 | soft edges | smooth shading, every other edge sharp |
-| paint, textures | materials (registry names), packed images, IngeTrazo's UVs |
+| paint, textures | materials (registry names), packed images, IngeTrazo's exact UVs |
+| face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
 | author's camera, saved views | cameras, plus a *Vista general* of the whole model |
 
-Not carried: dimensions, texts, section planes and sheets. Face-me figures
-come in as they stand (they do not turn toward the Blender camera).
+Not carried: dimensions, texts, section planes, sheets, and (yet) the render
+lights and material finishes that IngeTrazo 0.5.6 added.
 
-**Build the zip** (from this folder):
+## Build the zip
 
-    blender --command extension build --source-dir ingetrazo_io --output-dir .
+```bash
+blender --command extension build --source-dir ingetrazo_io --output-dir .
+```
 
-**Check it** in a real Blender:
+## Tests
 
-    blender -b --factory-startup --python tests/check_import.py
+Inside a real Blender, on a folder of `.igz` documents (for instance the
+examples of an IngeTrazo checkout):
 
-`tests/test_blender_igz_reader.py` in IngeTrazo's own suite keeps the
-add-on's UV and camera maths identical to the app's.
+```bash
+blender -b --factory-startup --python tests/check_import.py -- /path/to/ingetrazo/examples
+```
+
+The add-on re-implements IngeTrazo's texture projection and camera maths;
+`tests/test_parity_with_ingetrazo.py` checks them against IngeTrazo's own
+code (needs an IngeTrazo checkout and its Python environment):
+
+```bash
+INGETRAZO_SRC=/path/to/ingetrazo /path/to/ingetrazo/venv/bin/python -m pytest tests
+```
+
+## License
+
+GPL-3.0-or-later, like IngeTrazo.
