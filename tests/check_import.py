@@ -104,5 +104,95 @@ for path in docs:
     print(f"{path.name}: view rename -> {cams}")
     break
 
+# A group moved into another one (IngeTrazo's Outliner re-nesting) keeps
+# its Blender object on reload: same object, its modifier, same place.
+
+
+def rewrite(path: Path, edit) -> None:
+    raw = path.read_bytes()
+    if raw.startswith(b"PK"):
+        with zipfile.ZipFile(path) as zf:
+            members = {n: zf.read(n) for n in zf.namelist()}
+        doc = json.loads(members["document.json"])
+        edit(doc)
+        members["document.json"] = json.dumps(doc).encode()
+        with zipfile.ZipFile(path, "w") as zf:
+            for n, data in members.items():
+                zf.writestr(n, data)
+    else:
+        doc = json.loads(raw)
+        edit(doc)
+        path.write_text(json.dumps(doc))
+
+
+def mat_mul(a, b):
+    """Column-major 4x4 product (QMatrix4x4.data() order)."""
+    A = [[a[c * 4 + r] for c in range(4)] for r in range(4)]
+    B = [[b[c * 4 + r] for c in range(4)] for r in range(4)]
+    C = [[sum(A[r][k] * B[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
+    return [C[r][c] for c in range(4) for r in range(4)]
+
+
+def mat_inv(a):
+    from mathutils import Matrix
+    m = Matrix([[a[c * 4 + r] for c in range(4)] for r in range(4)]).inverted()
+    return [m[r][c] for c in range(4) for r in range(4)]
+
+
+for path in docs:
+    probe = ingetrazo_io.igz.Document(path)
+    placed = [g for g in probe.scene.get("groups", []) if g.get("xform")
+              and not g.get("billboard")]
+    probe.close()
+    if len(placed) < 2:
+        continue
+    tmp = Path(tempfile.mkdtemp()) / path.name
+    shutil.copy(path, tmp)
+
+    def give_uids(doc):
+        def walk(gs, prefix):
+            for i, g in enumerate(gs or []):
+                g.setdefault("uid", f"{prefix}{i}")
+                walk(g.get("children"), f"{prefix}{i}c")
+        walk(doc["scene"]["groups"], "t")
+    rewrite(tmp, give_uids)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(tmp))
+    doc0 = ingetrazo_io.igz.Document(tmp)
+    groups0 = [g for g in doc0.scene["groups"] if g.get("xform") and not g.get("billboard")]
+    moved_uid, host_uid = groups0[0]["uid"], groups0[1]["uid"]
+    doc0.close()
+    def by_uid(uid):
+        return [o for o in bpy.data.objects
+                if str(o.get(build.KEY_PROP, "")).endswith(uid)]
+    moved = by_uid(moved_uid)[0]
+    moved.modifiers.new("Bevel", "BEVEL")
+    world_before = moved.matrix_world.copy()
+
+    def renest(doc):
+        gs = doc["scene"]["groups"]
+        a = next(g for g in gs if g.get("uid") == moved_uid)
+        b = next(g for g in gs if g.get("uid") == host_uid)
+        gs.remove(a)
+        a["xform"] = mat_mul(mat_inv(b["xform"]), a["xform"])
+        b.setdefault("children", []).append(a)
+    rewrite(tmp, renest)
+    bpy.ops.ingetrazo.reload(filepath=str(tmp))
+    again = by_uid(moved_uid)
+    check(len(again) == 1, f"{path.name}: re-nested group duplicated or lost ({len(again)})")
+    if again:
+        obj = again[0]
+        check(obj.modifiers.get("Bevel") is not None,
+              f"{path.name}: re-nested group lost its modifier")
+        check(obj.parent is not None
+              and str(obj.parent.get(build.KEY_PROP, "")).endswith(host_uid),
+              f"{path.name}: re-nested group not parented to its new host")
+        drift = max(abs(obj.matrix_world[r][c] - world_before[r][c])
+                    for r in range(4) for c in range(4))
+        check(drift < 1e-4, f"{path.name}: re-nested group moved ({drift})")
+        print(f"{path.name}: re-nest -> parent {obj.parent.name if obj.parent else None}, "
+              f"modifier kept {obj.modifiers.get('Bevel') is not None}, drift {drift:.2e}")
+    break
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

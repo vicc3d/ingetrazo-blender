@@ -69,6 +69,8 @@ class Builder:
         self.registry = {m.get("name"): m for m in registry if isinstance(m, dict)}
         self.stats = {"objects": 0, "faces": 0, "components": 0}
         self.facing: list = []
+        self.uid_count: dict = {}
+        self.count_uids(self.scene_json.get("groups"))
 
     # ---- Collections -------------------------------------------------------
     def root_collection(self):
@@ -397,7 +399,7 @@ class Builder:
             obj["ingetrazo_billboard"] = str(billboard)
             self.facing.append(obj)
         for i, child, nk in self._named(g.get("children", []) or [], name_key or key):
-            self.group(child, f"{key}/{child.get('uid') or i}", root, obj, wear, nk)
+            self.group(child, self.key_for(child, f"{key}/{i}"), root, obj, wear, nk)
         return obj
 
     def recentre(self, me, turn: bool = False):
@@ -451,6 +453,23 @@ class Builder:
         me[DOC_PROP] = self.doc_path
         self.stats["faces"] += 1
         return me, Matrix.Translation(anchor)
+
+    def key_for(self, g: dict, path_key: str) -> str:
+        """The identity a reload finds a group's object by: its uid when the
+        document gives it one no other group shares — so a group moved into
+        or out of another keeps its object, modifiers and all — else its
+        position in the tree."""
+        uid = g.get("uid")
+        if uid and self.uid_count.get(uid) == 1:
+            return f"uid/{uid}"
+        return path_key
+
+    def count_uids(self, groups) -> None:
+        for g in groups or []:
+            uid = g.get("uid")
+            if uid:
+                self.uid_count[uid] = self.uid_count.get(uid, 0) + 1
+            self.count_uids(g.get("children"))
 
     @staticmethod
     def _named(groups, prefix):
@@ -576,7 +595,7 @@ class Builder:
             me = self.mesh(loose, None, self.doc.path.stem)
             self.place("loose", self.doc.path.stem, me, root)
         for i, g, nk in self._named(s.get("groups", []) or [], "g"):
-            self.group(g, f"g/{g.get('uid') or i}", root, name_key=nk)
+            self.group(g, self.key_for(g, f"g/{i}"), root, name_key=nk)
         self.cameras(root)
         # Face-me figures turn to the scene camera about their vertical axis.
         cam = self.context.scene.camera
