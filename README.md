@@ -11,6 +11,9 @@ components and tags, and updates the scene in place on every save.
 
 No network, no server: the bridge is the `.igz` file itself.
 
+![A spiral stair in IngeTrazo (left) and the same model in Blender, reloaded
+live with its components, cameras and face-me figure](docs/ingetrazo-to-blender.jpg)
+
 > Independent project, not affiliated with IngeTrazo's maintainers.
 
 ## Install
