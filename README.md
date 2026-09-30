@@ -73,6 +73,13 @@ code (needs an IngeTrazo checkout and its Python environment):
 INGETRAZO_SRC=/path/to/ingetrazo /path/to/ingetrazo/venv/bin/python -m pytest tests
 ```
 
-## License
+## Credits
 
-GPL-3.0-or-later, like IngeTrazo.
+**Concept, UX/UI & Design** — [Victor Crespo](https://3dvic.com)
+
+Developed with AI assistance (Claude). The texture projection and camera maths
+are ported from [IngeTrazo](https://github.com/ingelibre/ingetrazo) by Marco
+Sumari Tellez and contributors.
+
+Released under the GPL-3.0-or-later License (IngeTrazo's licence, which the
+ported code carries).

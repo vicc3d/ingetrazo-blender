@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Victor Crespo (3dvic.com · github.com/vicc3d)
 """Build (or rebuild) a Blender scene from an IngeTrazo document.
 
 The mapping:

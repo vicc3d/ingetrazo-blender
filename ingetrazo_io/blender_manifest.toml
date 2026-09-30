@@ -4,8 +4,9 @@ id = "ingetrazo_io"
 version = "0.1.1"
 name = "IngeTrazo (.igz)"
 tagline = "Import IngeTrazo documents and reload them when they change"
-maintainer = "Victor"
+maintainer = "Victor Crespo (3dvic.com · github.com/vicc3d)"
 type = "add-on"
+website = "https://github.com/vicc3d/ingetrazo-blender"
 
 blender_version_min = "5.0.0"
 

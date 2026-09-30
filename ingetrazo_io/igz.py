@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Victor Crespo (3dvic.com · github.com/vicc3d)
+# Texture projection and orbit-camera maths ported from IngeTrazo,
+# Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
 """Reading an IngeTrazo ``.igz`` document without IngeTrazo.
 
 Pure Python (no ``bpy``, no Qt), so it can be tested on its own. A document

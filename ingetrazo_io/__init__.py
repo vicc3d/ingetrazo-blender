@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Victor Crespo (3dvic.com · github.com/vicc3d)
 """IngeTrazo → Blender.
 
 File ▸ Import ▸ IngeTrazo (.igz) brings a document in with its groups,
