@@ -234,6 +234,11 @@ if reg and bpy.data.materials.get(reg[0]["name"]) is not None:
     bsdf = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
     check(m["ingetrazo_finish"] == "metal" and bsdf.inputs["Metallic"].default_value == 1.0,
           f"{path.name}: the chosen finish was not applied")
+for m in mats:
+    if m["ingetrazo_finish"] == "glass":
+        b = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+        check(b.inputs["Thin Wall"].default_value, f"{m.name}: glass not a thin pane")
+        check(bpy.context.scene.eevee.use_raytracing, "glass without EEVEE ray tracing")
 lamps = sorted((o for o in bpy.data.objects if o.type == "LIGHT"), key=lambda o: o.name)
 check(sorted(o.data.type for o in lamps) == ["POINT", "SPOT"],
       f"{path.name}: lights {[o.data.type for o in lamps]}")

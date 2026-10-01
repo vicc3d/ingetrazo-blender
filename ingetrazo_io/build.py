@@ -20,7 +20,8 @@ The mapping:
   to its unpainted faces;
 - each material's finish (IngeTrazo 0.5.6+: matte, satin, gloss, metal,
   glass, water — chosen, or guessed from the name) → its Principled BSDF,
-  as IngeTrazo's own «Render with Blender» sets it;
+  as IngeTrazo's own «Render with Blender» sets it (glass as a thin pane,
+  and EEVEE's ray tracing on so it is seen through);
 - the lights of IngeTrazo's Render panel → point and spot lights;
 - the author's camera and every saved view → cameras.
 
@@ -249,7 +250,13 @@ class Builder:
         put(coat, 0.5 if kind == "gloss" else 0.0)
         put(("Coat Roughness", "Clearcoat Roughness"), 0.03)
         put(trans, 1.0 if kind == "glass" else 0.0)
-        if kind == "glass":
+        glass = kind == "glass"
+        # A pane drawn as ONE face, as glass is drawn in IngeTrazo: thin
+        # wall, or Blender refracts it as a solid block and it turns dark.
+        put(("Thin Wall",), glass)
+        if hasattr(mat, "thickness_mode"):
+            mat.thickness_mode = "SLAB" if glass else "SPHERE"
+        if glass:
             # Real refraction instead of a see-through alpha.
             for link in list(bsdf.inputs["Alpha"].links):
                 links.remove(link)
@@ -727,6 +734,12 @@ class Builder:
             self.group(g, self.key_for(g, f"g/{i}"), root, name_key=nk)
         self.cameras(root)
         self.lights(root)
+        # EEVEE draws glass as an opaque sheet unless the scene ray-traces
+        # (off by default): a model with glass turns it on.
+        ee = getattr(self.context.scene, "eevee", None)
+        if ee is not None and hasattr(ee, "use_raytracing") and any(
+                m.get("ingetrazo_finish") == "glass" for m in self.materials.values()):
+            ee.use_raytracing = True
         # Face-me figures turn to the scene camera about their vertical axis.
         cam = self.context.scene.camera
         for obj in self.facing:

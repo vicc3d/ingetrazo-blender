@@ -49,7 +49,7 @@ Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
 | soft edges | smooth shading, every other edge sharp |
 | paint, textures | materials (registry names), packed images, IngeTrazo's exact UVs |
 | face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
-| material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass refracts, water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
+| material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass is a thin pane you see through — the add-on turns on EEVEE's ray tracing for it — and water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
 | lights of the Render panel (0.5.6+) | point and spot lights in a *Luces* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
 | author's camera, saved views | cameras, plus a *Vista general* of the whole model |
 
