@@ -256,5 +256,20 @@ check(len(lamps) == 1 and lamps[0].hide_render
 print(f"{path.name}: finishes {sorted({m['ingetrazo_finish'] for m in mats})}, "
       f"lights after reload {[(o.name, o.hide_render) for o in lamps]}")
 
+# A translucent paint on an opaque picture (IngeTrazo's water_calm 75%)
+# stays translucent: the picture's (opaque) alpha must not override it.
+for path in docs:
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(path))
+    for m in bpy.data.materials:
+        b = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) \
+            if m.node_tree else None
+        img = next((n.image for n in m.node_tree.nodes if n.type == "TEX_IMAGE"), None) \
+            if m.node_tree else None
+        if b is None or img is None or img.depth in (32, 64, 128):
+            continue
+        check(not b.inputs["Alpha"].links,
+              f"{path.name}: {m.name}: an opaque picture drives the alpha")
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

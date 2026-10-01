@@ -48,6 +48,7 @@ KEY_PROP = "ingetrazo_key"
 MTIME_PROP = "ingetrazo_mtime"
 DEFAULT_MATERIAL = "IngeTrazo por defecto"
 RIPPLES = "IngeTrazo ripples"
+OPACITY = "IngeTrazo opacity"
 
 
 def _srgb_to_linear(c: float) -> float:
@@ -188,8 +189,25 @@ class Builder:
             node.image = img
             node.location = (bsdf.location.x - 320, bsdf.location.y)
             links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
-            if img.depth == 32 or img.channels == 4:
-                links.new(node.outputs["Alpha"], bsdf.inputs["Alpha"])
+        for n in [n for n in nodes if n.name.startswith(OPACITY)]:
+            nodes.remove(n)
+        # Blender gives every image four channels: only a picture saved
+        # with transparency (a cut-out figure, leaves) has a real alpha.
+        # An opaque one wired in would cancel the face's opacity.
+        if img is not None and img.depth in (32, 64, 128):
+            alpha = node.outputs["Alpha"]
+            if opacity is not None and float(opacity) < 1.0:
+                mul = nodes.new("ShaderNodeMath")
+                mul.name = OPACITY
+                mul.operation = "MULTIPLY"
+                mul.inputs[1].default_value = float(opacity)
+                mul.location = (bsdf.location.x - 160, bsdf.location.y - 300)
+                links.new(alpha, mul.inputs[0])
+                alpha = mul.outputs["Value"]
+            links.new(alpha, bsdf.inputs["Alpha"])
+        else:
+            for link in list(bsdf.inputs["Alpha"].links):
+                links.remove(link)
         if opacity is not None and float(opacity) < 1.0:
             bsdf.inputs["Alpha"].default_value = float(opacity)
             mat.diffuse_color[3] = float(opacity)
