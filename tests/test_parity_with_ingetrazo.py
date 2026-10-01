@@ -98,3 +98,58 @@ def test_container_paint_goes_to_unpainted_faces_only():
     assert igz.effective_attrs({}, container)["color"] == [0.1, 0.2, 0.3]
     own = {"color": [1, 0, 0]}
     assert igz.effective_attrs(own, container) is own
+
+
+# ---- Finishes and lights (IngeTrazo 0.5.6+) ---------------------------------
+
+_fspec = importlib.util.spec_from_file_location(
+    "ingetrazo_blender_finish",
+    Path(__file__).resolve().parents[1] / "ingetrazo_io" / "finish.py")
+fin = importlib.util.module_from_spec(_fspec)
+_fspec.loader.exec_module(fin)
+
+
+def test_finish_guesses_match_ingetrazo():
+    from core import finish as ref
+    assert fin.FINISHES == ref.FINISHES
+    names = ["water_calm", "[Water Pool Light]", "Metal_10_1K", "Marble_07",
+             "Mar", "Marble", "vidrio pulido", "Madera roble", "acero inox",
+             "Laca blanca", "aço", "Aço escovado", "pileta", "Ladrillo",
+             None, "", "Cristal templado", "Leather-brown", "porcelanato"]
+    for n in names:
+        for pic in (None, "Wood_04.jpg", "glass-pane.png", "concrete.png"):
+            for op in (None, 0.5, 1.0):
+                assert fin.guess(n, pic, op) == ref.guess(n, pic, op), (n, pic, op)
+                for chosen in (None, "auto", "metal", "nonsense"):
+                    assert fin.resolve(chosen, n, pic, op) == \
+                        ref.resolve(chosen, n, pic, op)
+
+
+def test_lights_are_cleaned_like_ingetrazo():
+    from core import render_blender as ref
+    raw = [
+        {"kind": "point", "pos": [1, 2, 3]},
+        {"kind": "spot", "pos": [0, 0, 4], "dir": [0, 0, 0], "kelvin": 99999,
+         "power": -5, "angle": 400, "on": False, "name": "Poste"},
+        {"kind": "spot", "pos": [0, 0, 4], "color": "cool"},
+        {"kind": "point", "pos": [0, 0, 1], "color": [2, 0.5, -1]},
+        {"kind": "area", "pos": [0, 0, 0]},
+        {"kind": "point", "pos": ["x", 0, 0]},
+        {"kind": "point"},
+        "nonsense",
+        {"kind": "point", "pos": [float("nan"), 0, 0]},
+    ]
+    ours = fin.lights({"plugin_data": {"render_blender": {"lights": raw}}})
+    theirs = ref.clean_lights(raw)
+    assert len(ours) == len(theirs) == 4
+    for a, b in zip(ours, theirs):
+        for k in ("kind", "pos", "dir", "power", "angle", "on", "name"):
+            assert a[k] == b[k], k
+        assert all(abs(x - y) < 1e-4 for x, y in zip(a["color"], b["color"]))
+    for k in (1800, 2700, 4000, 6500, 10000):
+        assert fin.kelvin_to_rgb(k) == ref.kelvin_to_rgb(k)
+
+
+def test_no_lights_when_the_document_has_none():
+    assert fin.lights({}) == []
+    assert fin.lights({"plugin_data": {"render_blender": "x"}}) == []

@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "ingetrazo_io"
-version = "0.1.3"
+version = "0.1.4"
 name = "IngeTrazo (.igz)"
 tagline = "Import IngeTrazo documents and reload them when they change"
 maintainer = "Victor Crespo (3dvic.com · github.com/vicc3d)"

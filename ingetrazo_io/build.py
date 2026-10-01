@@ -18,6 +18,10 @@ The mapping:
 - paint → materials (the registry name when the face has one), textures
   packed into the .blend with IngeTrazo's exact UVs; a group's paint goes
   to its unpainted faces;
+- each material's finish (IngeTrazo 0.5.6+: matte, satin, gloss, metal,
+  glass, water — chosen, or guessed from the name) → its Principled BSDF,
+  as IngeTrazo's own «Render with Blender» sets it;
+- the lights of IngeTrazo's Render panel → point and spot lights;
 - the author's camera and every saved view → cameras.
 
 Everything created carries ``ingetrazo_doc`` / ``ingetrazo_key`` custom
@@ -36,12 +40,14 @@ import bpy
 from mathutils import Matrix, Vector
 from mathutils.geometry import tessellate_polygon
 
+from . import finish as fin
 from . import igz
 
 DOC_PROP = "ingetrazo_doc"
 KEY_PROP = "ingetrazo_key"
 MTIME_PROP = "ingetrazo_mtime"
 DEFAULT_MATERIAL = "IngeTrazo por defecto"
+RIPPLES = "IngeTrazo ripples"
 
 
 def _srgb_to_linear(c: float) -> float:
@@ -147,6 +153,11 @@ class Builder:
             mat[DOC_PROP] = self.doc_path
             self._paint(mat, color or (None if img is not None else igz.DEFAULT_COLOR),
                         img, opacity)
+            picture = img.name if img is not None else None
+            chosen = (self.registry.get(reg) or {}).get("finish") if reg else None
+            kind = fin.resolve(chosen, reg, picture, opacity)
+            self._finish(mat, kind)
+            mat["ingetrazo_finish"] = kind
         self.materials[key] = mat
         return mat
 
@@ -184,6 +195,68 @@ class Builder:
             mat.diffuse_color[3] = float(opacity)
             if hasattr(mat, "surface_render_method"):
                 mat.surface_render_method = "BLENDED"
+
+    @staticmethod
+    def _finish(mat, kind: str) -> None:
+        """How the surface answers light, with the values IngeTrazo's own
+        render script uses (resources/blender/render_scene.py)."""
+        nodes, links = mat.node_tree.nodes, mat.node_tree.links
+        bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if bsdf is None:
+            return
+        for n in [n for n in nodes if n.name.startswith(RIPPLES)]:
+            nodes.remove(n)
+
+        def put(names, value):
+            for n in names:
+                sock = bsdf.inputs.get(n)
+                if sock is not None:
+                    sock.default_value = value
+                    return
+
+        spec = ("Specular IOR Level", "Specular")
+        coat = ("Coat Weight", "Clearcoat")
+        trans = ("Transmission Weight", "Transmission")
+        # Every finish sets every value: a reload that changes a finish
+        # must not leave the previous one's metal or coat behind.
+        rough, metal, ior = {
+            "matte": (0.9, 0.0, 1.5), "satin": (0.45, 0.0, 1.5),
+            "gloss": (0.1, 0.0, 1.5), "metal": (0.28, 1.0, 1.5),
+            "glass": (0.0, 0.0, 1.45), "water": (0.02, 0.0, 1.33),
+        }[kind]
+        put(("Roughness",), rough)
+        put(("Metallic",), metal)
+        put(("IOR",), ior)
+        put(spec, 0.3 if kind == "matte" else 1.0 if kind in ("glass", "water") else 0.5)
+        put(coat, 0.5 if kind == "gloss" else 0.0)
+        put(("Coat Roughness", "Clearcoat Roughness"), 0.03)
+        put(trans, 1.0 if kind == "glass" else 0.0)
+        if kind == "glass":
+            # Real refraction instead of a see-through alpha.
+            for link in list(bsdf.inputs["Alpha"].links):
+                links.remove(link)
+            bsdf.inputs["Alpha"].default_value = 1.0
+            mat.diffuse_color[3] = 0.3
+            if hasattr(mat, "surface_render_method"):
+                mat.surface_render_method = "DITHERED"
+            if hasattr(mat, "use_raytrace_refraction"):
+                mat.use_raytrace_refraction = True
+        elif kind == "water":
+            # Small waves: noise → bump → the BSDF's normal.
+            noise = nodes.new("ShaderNodeTexNoise")
+            noise.name = RIPPLES + " noise"
+            noise.inputs["Scale"].default_value = 6.0
+            if "Detail" in noise.inputs:
+                noise.inputs["Detail"].default_value = 6.0
+            bump = nodes.new("ShaderNodeBump")
+            bump.name = RIPPLES + " bump"
+            bump.inputs["Strength"].default_value = 0.12
+            if "Distance" in bump.inputs:
+                bump.inputs["Distance"].default_value = 0.02
+            noise.location = (bsdf.location.x - 520, bsdf.location.y - 300)
+            bump.location = (bsdf.location.x - 260, bsdf.location.y - 300)
+            links.new(noise.outputs["Fac"], bump.inputs["Height"])
+            links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
 
     # ---- Meshes ----------------------------------------------------------------
     def mesh(self, mjson: dict, container: dict | None, name: str):
@@ -582,6 +655,44 @@ class Builder:
         rot = Matrix((right, true_up, -f)).transposed().to_4x4()
         obj.matrix_world = Matrix.Translation(eye) @ rot
 
+    def lights(self, root) -> None:
+        """The lights placed in IngeTrazo's Render panel, in real watts.
+        One switched off there is kept here, hidden, ready to turn on."""
+        found = fin.lights(self.scene_json)
+        coll = self.tag_collection(root, "Luces") if found else None
+        for i, lt in enumerate(found):
+            kind = "SPOT" if lt["kind"] == "spot" else "POINT"
+            name = _short(lt["name"] or f"Luz {i + 1}")
+            obj = self.take(f"light/{i}", None)
+            if obj is not None and obj.type != "LIGHT":
+                bpy.data.objects.remove(obj)
+                obj = None
+            if obj is None:
+                data = bpy.data.lights.new(name, type=kind)
+                obj = bpy.data.objects.new(name, data)
+                obj[DOC_PROP] = self.doc_path
+                obj[KEY_PROP] = f"light/{i}"
+                coll.objects.link(obj)
+            else:
+                obj.name = name
+                obj.data.name = name
+                obj.data.type = kind
+            data = obj.data
+            data.energy = lt["power"]
+            data.color = tuple(lt["color"])
+            if hasattr(data, "shadow_soft_size"):
+                data.shadow_soft_size = 0.08          # a lamp, not a point
+            if kind == "SPOT":
+                data.spot_size = math.radians(lt["angle"])
+                data.spot_blend = 0.35
+            # A spot shines along its local -Z.
+            d = Vector(lt["dir"]).normalized()
+            rot = d.to_track_quat("-Z", "Y").to_matrix().to_4x4() \
+                if kind == "SPOT" else Matrix.Identity(4)
+            obj.matrix_world = Matrix.Translation(Vector(lt["pos"])) @ rot
+            obj.hide_viewport = obj.hide_render = not lt["on"]
+            self.stats["lights"] = self.stats.get("lights", 0) + 1
+
     # ---- The whole document ------------------------------------------------------
     def build(self):
         s = self.scene_json
@@ -597,6 +708,7 @@ class Builder:
         for i, g, nk in self._named(s.get("groups", []) or [], "g"):
             self.group(g, self.key_for(g, f"g/{i}"), root, name_key=nk)
         self.cameras(root)
+        self.lights(root)
         # Face-me figures turn to the scene camera about their vertical axis.
         cam = self.context.scene.camera
         for obj in self.facing:

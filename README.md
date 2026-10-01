@@ -32,7 +32,8 @@ Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
   you save it again in IngeTrazo — with **Reload**, or automatically with
   **Reload when the file changes**.
 - A reload updates what came from the file (geometry, placements, new and
-  deleted groups) and keeps what you added in Blender: lights, your own
+  deleted groups, IngeTrazo's lights) and keeps what you added in Blender:
+  your own lights, your own
   cameras, modifiers and the materials you edited. The material button next
   to Reload overwrites those materials too.
 
@@ -48,10 +49,16 @@ Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
 | soft edges | smooth shading, every other edge sharp |
 | paint, textures | materials (registry names), packed images, IngeTrazo's exact UVs |
 | face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
+| material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass refracts, water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
+| lights of the Render panel (0.5.6+) | point and spot lights in a *Luces* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
 | author's camera, saved views | cameras, plus a *Vista general* of the whole model |
 
-Not carried: dimensions, texts, section planes, sheets, and (yet) the render
-lights and material finishes that IngeTrazo 0.5.6 added.
+Not carried: dimensions, texts, section planes, sheets, and the Render
+panel's ambience (day sun, night, overcast) — light the world in Blender.
+
+Materials imported with an earlier version of the add-on keep their old
+settings: use the material button next to Reload once to give them their
+finishes.
 
 ## Build the zip
 
@@ -68,7 +75,8 @@ examples of an IngeTrazo checkout):
 blender -b --factory-startup --python tests/check_import.py -- /path/to/ingetrazo/examples
 ```
 
-The add-on re-implements IngeTrazo's texture projection and camera maths;
+The add-on re-implements IngeTrazo's texture projection, camera maths, finish
+guessing and light rules;
 `tests/test_parity_with_ingetrazo.py` checks them against IngeTrazo's own
 code (needs an IngeTrazo checkout and its Python environment):
 
@@ -80,8 +88,8 @@ INGETRAZO_SRC=/path/to/ingetrazo /path/to/ingetrazo/venv/bin/python -m pytest te
 
 **Concept, UX/UI & Design** — [Victor Crespo](https://3dvic.com)
 
-Developed with AI assistance (Claude). The texture projection and camera maths
-are ported from [IngeTrazo](https://github.com/ingelibre/ingetrazo) by Marco
+Developed with AI assistance (Claude). The texture projection, camera maths,
+material finishes and light rules are ported from [IngeTrazo](https://github.com/ingelibre/ingetrazo) by Marco
 Sumari Tellez and contributors.
 
 Released under the GPL-3.0-or-later License (IngeTrazo's licence, which the
