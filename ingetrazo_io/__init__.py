@@ -97,7 +97,7 @@ def _prefs(context):
 
 class INGETRAZO_OT_send_uvs(bpy.types.Operator):
     """Write the texture mapping edited in Blender's UV editor into the
-    .igz, so IngeTrazo shows it (a backup of the file is kept as .igz.bak)"""
+    .igz, so IngeTrazo shows it (a dated backup of the file is kept beside it)"""
     bl_idname = "ingetrazo.send_uvs"
     bl_label = "Send UVs to IngeTrazo"
     bl_options = {"REGISTER"}
@@ -189,7 +189,7 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
             box = col.box()
             lines(box, "FILE_REFRESH", f"After sending, close {name} in IngeTrazo",
                   "and open it again to see the new mapping.",
-                  f"A backup is kept as {name}.bak.")
+                  "A dated backup is kept beside it (.igz.bak).")
             box.prop(self, "dont_remind")
 
     def execute(self, context):
@@ -218,6 +218,8 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
                f"{os.path.basename(self.filepath)} — reopen it in IngeTrazo")
         if st["max_error"] > 1e-4:
             msg += " (some edits were approximated)"
+        if st.get("backup"):
+            msg += f"; backup: {os.path.basename(st['backup'])}"
         self.report({"INFO"}, msg)
         return {"FINISHED"}
 

@@ -324,7 +324,12 @@ for path in docs:
     stats = writeback.send_uvs(str(tmp))
     check(stats["written"] > 0 and stats["max_error"] < 1e-5,
           f"{path.name}: UVs not sent ({stats})")
-    check(Path(str(tmp) + ".bak").is_file(), f"{path.name}: no backup")
+    check(Path(stats.get("backup", "")).is_file(), f"{path.name}: no backup")
+    # Dated backups pile up to KEEP_BACKUPS, the oldest go.
+    for _ in range(writeback.KEEP_BACKUPS + 2):
+        writeback.backup(str(tmp))
+    baks = list(tmp.parent.glob(tmp.name[:-4] + ".*.igz.bak"))
+    check(len(baks) == writeback.KEEP_BACKUPS, f"{path.name}: {len(baks)} backups kept")
     src = me[build.SRC_PROP]
     bpy.ops.wm.read_factory_settings(use_empty=True)
     build.import_igz(bpy.context, str(tmp))

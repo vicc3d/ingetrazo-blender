@@ -14,11 +14,13 @@ Safety first, since this writes the user's own document:
   (otherwise IngeTrazo's newer work would be overwritten): reload first;
 - only faces whose corners are still where IngeTrazo has them, and that
   carry their own texture (a face painted through its group is skipped);
-- a copy of the document is kept as ``<name>.igz.bak`` before writing.
+- a dated copy of the document is kept next to it before writing,
+  ``<name>.<YYYY-MM-DD-HHMMSS>.igz.bak`` (the newest :data:`KEEP_BACKUPS`).
 """
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -31,6 +33,31 @@ from . import build, igz
 _SAME_POINT = 1e-4
 #: Below this the UVs did not change.
 _SAME_UV = 1e-6
+#: Dated backups kept per document; older ones are removed.
+KEEP_BACKUPS = 10
+
+
+def backup(doc_path: str) -> str:
+    """Copy the document to ``<name>.<date-time>.igz.bak`` beside it, keep
+    the newest :data:`KEEP_BACKUPS` of them, and return the new one's path."""
+    import time
+    p = Path(doc_path)
+    stem = p.name[:-4] if p.name.lower().endswith(".igz") else p.name
+    out = p.with_name(f"{stem}.{time.strftime('%Y-%m-%d-%H%M%S')}.igz.bak")
+    n = 1
+    while out.exists():               # two sends within the same second
+        out = p.with_name(f"{stem}.{time.strftime('%Y-%m-%d-%H%M%S')}-{n}.igz.bak")
+        n += 1
+    shutil.copy2(p, out)
+    pattern = re.compile(re.escape(stem) + r"\.\d{4}-\d\d-\d\d-\d{6}(-\d+)?\.igz\.bak$")
+    olds = sorted((q for q in p.parent.iterdir() if pattern.match(q.name)),
+                  key=lambda q: q.stat().st_mtime)
+    for q in olds[:-KEEP_BACKUPS]:
+        try:
+            q.unlink()
+        except OSError:
+            pass
+    return str(out)
 
 
 class Changed(Exception):
@@ -160,7 +187,7 @@ def send_uvs(doc_path: str, own_paint: bool = False,
                 stats["own_paint"] += 1
             tex["uvw"] = [round(x, 12) for x in uvw]
     if stats["written"] and not dry_run:
-        shutil.copy2(doc_path, doc_path + ".bak")
+        stats["backup"] = backup(doc_path)
         igz.write_document(doc_path, scene)
         # Our own save: the auto-reload must not take it for IngeTrazo's.
         root[build.MTIME_PROP] = os.path.getmtime(doc_path)

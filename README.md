@@ -46,8 +46,8 @@ shows its texture where you left it in Blender.
 
 - Only the texture mapping travels back — never geometry.
 - It writes only if the `.igz` has not been saved in IngeTrazo since you
-  loaded it here (otherwise: **Reload**, then send), and keeps a copy of the
-  previous file as `<name>.igz.bak`.
+  loaded it here (otherwise: **Reload**, then send), and keeps a dated copy
+  of the previous file beside it, `<name>.<date-time>.igz.bak` (the newest 10).
 - Move, rotate, scale, shear or unwrap a face's UVs: IngeTrazo holds that
   exactly (one flat map per face). Dragging single UV points out of shape is
   approximated.
