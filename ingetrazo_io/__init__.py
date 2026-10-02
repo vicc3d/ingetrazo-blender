@@ -6,7 +6,8 @@ File ▸ Import ▸ IngeTrazo (.igz) brings a document in with its groups,
 components, tags, materials, textures, soft edges and cameras. The
 IngeTrazo tab of the 3D view's sidebar (N) reloads it after you save again
 in IngeTrazo — by hand, or automatically whenever the file changes — keeping
-what you added in Blender.
+what you added in Blender. One thing travels back: **Send UVs** writes the
+texture mapping edited in Blender's UV editor into the .igz (writeback.py).
 
 No network: the "bridge" is the .igz file itself.
 """
@@ -18,7 +19,7 @@ import bpy
 from bpy.props import BoolProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
-from . import build
+from . import build, writeback
 
 
 def _documents():
@@ -76,6 +77,53 @@ class INGETRAZO_OT_reload(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class INGETRAZO_OT_send_uvs(bpy.types.Operator):
+    """Write the texture mapping edited in Blender's UV editor into the
+    .igz, so IngeTrazo shows it (a backup of the file is kept as .igz.bak)"""
+    bl_idname = "ingetrazo.send_uvs"
+    bl_label = "Send UVs to IngeTrazo"
+    bl_options = {"REGISTER"}
+
+    filepath: StringProperty()
+
+    def execute(self, context):
+        # UVs edited in Edit Mode live in the edit mesh: step out to Object
+        # Mode so the mesh holds them, and back in afterwards.
+        editing = context.mode == "EDIT_MESH"
+        if editing:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        try:
+            st = writeback.send_uvs(self.filepath)
+        except writeback.Changed:
+            self.report({"ERROR"}, "IngeTrazo: the .igz was saved in IngeTrazo "
+                        "after it was loaded here. Reload first, then send.")
+            return {"CANCELLED"}
+        except (OSError, ValueError, KeyError) as exc:
+            self.report({"ERROR"}, f"IngeTrazo: {exc}")
+            return {"CANCELLED"}
+        finally:
+            if editing:
+                bpy.ops.object.mode_set(mode="EDIT")
+        notes = []
+        if st["skipped_unpainted"]:
+            notes.append(f"{st['skipped_unpainted']} take their texture from "
+                         "their group (paint the face itself in IngeTrazo)")
+        if st["skipped_geometry"]:
+            notes.append(f"{st['skipped_geometry']} were moved or reshaped in "
+                         "Blender (only UVs travel back)")
+        if not st["written"]:
+            msg = "IngeTrazo: no UV changes to send"
+        else:
+            msg = (f"IngeTrazo: UVs of {st['written']} face(s) sent — reopen "
+                   f"the file in IngeTrazo (backup: {os.path.basename(self.filepath)}.bak)")
+            if st["max_error"] > 1e-4:
+                msg += "; some edits were not flat-affine and were approximated"
+        if notes:
+            msg += ". Skipped: " + "; ".join(notes)
+        self.report({"WARNING"} if notes else {"INFO"}, msg)
+        return {"FINISHED"}
+
+
 def _auto_reload():
     """Timer: reload every imported document whose file changed. IngeTrazo
     saves through a temporary file and a rename, so the new mtime appears
@@ -122,6 +170,9 @@ class INGETRAZO_PT_panel(bpy.types.Panel):
                               icon="MATERIAL")
             op.filepath = path
             op.update_materials = True
+            op = box.operator(INGETRAZO_OT_send_uvs.bl_idname, icon="UV",
+                              text="Send UVs to IngeTrazo")
+            op.filepath = path
             if not os.path.isfile(path):
                 box.label(text="File not found", icon="ERROR")
 
@@ -130,7 +181,8 @@ def _menu_import(self, _context):
     self.layout.operator(INGETRAZO_OT_import.bl_idname, text="IngeTrazo (.igz)")
 
 
-_classes = (INGETRAZO_OT_import, INGETRAZO_OT_reload, INGETRAZO_PT_panel)
+_classes = (INGETRAZO_OT_import, INGETRAZO_OT_reload, INGETRAZO_OT_send_uvs,
+            INGETRAZO_PT_panel)
 
 
 def register():

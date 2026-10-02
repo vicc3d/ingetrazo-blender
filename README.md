@@ -37,6 +37,23 @@ Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
   cameras, modifiers and the materials you edited. The material button next
   to Reload overwrites those materials too.
 
+## Send UVs back to IngeTrazo
+
+Model in IngeTrazo, place textures precisely in Blender's UV editor, and send
+the mapping back: **Send UVs to IngeTrazo** in the IngeTrazo tab writes the
+UVs you edited into the `.igz`. Reopen the file in IngeTrazo and each face
+shows its texture where you left it in Blender.
+
+- Only the texture mapping travels back — never geometry.
+- It writes only if the `.igz` has not been saved in IngeTrazo since you
+  loaded it here (otherwise: **Reload**, then send), and keeps a copy of the
+  previous file as `<name>.igz.bak`.
+- Move, rotate, scale, shear or unwrap a face's UVs: IngeTrazo holds that
+  exactly (one flat map per face). Dragging single UV points out of shape is
+  approximated.
+- A face that wears its group's paint is skipped: paint the face itself in
+  IngeTrazo first.
+
 ## What comes across
 
 | IngeTrazo | Blender |

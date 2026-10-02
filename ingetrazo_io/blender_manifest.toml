@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "ingetrazo_io"
-version = "0.1.5"
+version = "0.2.0"
 name = "IngeTrazo (.igz)"
-tagline = "Import IngeTrazo documents and reload them when they change"
+tagline = "Import IngeTrazo documents, reload them, send UVs back"
 maintainer = "Victor Crespo (3dvic.com · github.com/vicc3d)"
 type = "add-on"
 website = "https://github.com/vicc3d/ingetrazo-blender"
@@ -14,4 +14,4 @@ license = ["SPDX:GPL-3.0-or-later"]
 tags = ["Import-Export"]
 
 [permissions]
-files = "Read .igz documents and extract their embedded textures"
+files = "Read .igz documents; write edited UVs back (with a backup)"

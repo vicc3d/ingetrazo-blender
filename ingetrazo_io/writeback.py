@@ -70,7 +70,8 @@ def send_uvs(doc_path: str) -> dict:
             continue
         attr = me.attributes.get(build.FACE_ATTR)
         uvl = me.uv_layers.active
-        if attr is None or uvl is None or not me.polygons:
+        if attr is None or uvl is None or not me.polygons \
+                or len(attr.data) != len(me.polygons):
             continue
         src = str(me[build.SRC_PROP])
         faces = igz.faces_at(scene, src)
