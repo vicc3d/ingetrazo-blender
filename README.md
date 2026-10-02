@@ -3,7 +3,9 @@
 A Blender 5 extension that imports [IngeTrazo](https://github.com/ingelibre/ingetrazo)
 documents (`.igz`) **with their structure** and reloads them when they
 change, so a model drawn in IngeTrazo can be lit, textured and rendered in
-Blender while you keep modelling in IngeTrazo.
+Blender while you keep modelling in IngeTrazo — and that sends the **UV
+mapping** you edit in Blender back into the `.igz`, so IngeTrazo shows the
+textures where you placed them.
 
 It complements IngeTrazo's own *Render with Blender* tab (which renders
 from inside IngeTrazo): this one works from inside Blender, keeps groups,
@@ -51,6 +53,9 @@ shows its texture where you left it in Blender.
 - Move, rotate, scale, shear or unwrap a face's UVs: IngeTrazo holds that
   exactly (one flat map per face). Dragging single UV points out of shape is
   approximated.
+![The Send UVs dialog: what will be sent, and a reminder to reopen the file
+in IngeTrazo](docs/send-uvs-dialog.png)
+
 - Before sending, a dialog says what will travel. A face that wears its
   group's paint can get its own copy of that paint, mapped as you edited it
   (its own paint then wins over the group's, as in IngeTrazo). Faces inside
