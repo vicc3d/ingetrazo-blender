@@ -153,3 +153,58 @@ def test_lights_are_cleaned_like_ingetrazo():
 def test_no_lights_when_the_document_has_none():
     assert fin.lights({}) == []
     assert fin.lights({"plugin_data": {"render_blender": "x"}}) == []
+
+
+# ---- UVs back to IngeTrazo ---------------------------------------------------
+
+def _rand_face(rnd):
+    """A random planar polygon in 3D: a convex 2D loop placed on a random
+    plane."""
+    from math import cos, sin, tau
+    n = rnd.randint(3, 8)
+    angs = sorted(rnd.uniform(0, tau) for _ in range(n))
+    loop = [(rnd.uniform(0.5, 3) * cos(a), rnd.uniform(0.5, 3) * sin(a)) for a in angs]
+    nrm = igz.normalize((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1)))
+    e1 = igz.normalize(igz.cross(nrm, (0.3, 0.5, 0.8)))
+    e2 = igz.cross(nrm, e1)
+    o = (rnd.uniform(-9, 9), rnd.uniform(-9, 9), rnd.uniform(-9, 9))
+    return [tuple(o[k] + x * e1[k] + y * e2[k] for k in range(3)) for x, y in loop]
+
+
+def test_a_fitted_map_reproduces_affine_uvs_and_matches_ingetrazo():
+    from core.texture import affine_uv, fit_uv_affine
+    rnd = random.Random(11)
+    for _ in range(200):
+        pts = _rand_face(rnd)
+        # Any affine UV edit: a random 2D affine map of the face's own UVs.
+        base = igz.face_uvs({"sw": 1.3, "sh": 0.7}, igz.polygon_normal(pts), pts)
+        a, b, c, d = (rnd.uniform(-2, 2) for _ in range(4))
+        tu, tv = rnd.uniform(-5, 5), rnd.uniform(-5, 5)
+        uvs = [(a * u + b * v + tu, c * u + d * v + tv) for u, v in base]
+        if abs(a * d - b * c) < 1e-3:
+            continue
+        uvw, err = igz.fit_uvw(pts, uvs)
+        assert err < 1e-7
+        # IngeTrazo draws it exactly there…
+        for (u, v), (ru, rv) in zip(uvs, affine_uv(uvw, pts)):
+            assert abs(u - ru) < 1e-7 and abs(v - rv) < 1e-7
+        # …and its own fit of the same UVs is the same map on the face
+        # (IngeTrazo's runs through QVector3D, single precision: compare
+        # relative to the size of the values).
+        ref = fit_uv_affine([QVector3D(*p) for p in pts], uvs)
+        for (u, v), (ru, rv) in zip(affine_uv(ref, pts), affine_uv(uvw, pts)):
+            assert abs(u - ru) <= 1e-5 * max(1.0, abs(u))
+            assert abs(v - rv) <= 1e-5 * max(1.0, abs(v))
+
+
+def test_a_non_affine_edit_is_fitted_and_its_error_reported():
+    rnd = random.Random(5)
+    pts = [(0, 0, 0), (2, 0, 0), (2, 1, 0), (0, 1, 0)]
+    uvs = [(0, 0), (1, 0), (1.4, 1.2), (0, 1)]       # one corner dragged
+    uvw, err = igz.fit_uvw(pts, uvs)
+    assert uvw is not None and 0.05 < err < 1.0
+    assert abs(uvw[2]) < 1e-12 and abs(uvw[6]) < 1e-12   # no normal component
+
+
+def test_a_degenerate_face_has_no_map():
+    assert igz.fit_uvw([(0, 0, 0), (1, 0, 0), (2, 0, 0)], [(0, 0)] * 3) == (None, None)

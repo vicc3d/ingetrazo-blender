@@ -149,6 +149,137 @@ def face_uvs(tex: dict, normal, pts):
     return [(dot(p, u_axis) / sw, dot(p, v_axis) / sh) for p in pts]
 
 
+def fit_uvw(points, uvs):
+    """The world→UV map ``[ux, uy, uz, uc, vx, vy, vz, vc]`` IngeTrazo
+    stores as a face's ``texture["uvw"]``, fitted to UVs edited elsewhere
+    (Blender's UV editor). ``(uvw, error)``: the least-squares fit over the
+    face's plane, and the largest UV distance it misses a point by — 0 for
+    anything affine (move, rotate, scale, shear, a planar unwrap), which is
+    every edit IngeTrazo's map can hold exactly. ``(None, None)`` for a
+    degenerate face.
+
+    Same map as IngeTrazo's ``core.texture.fit_uv_affine`` on affine UVs
+    (which fits three points exactly); over all points when they are not,
+    and with no gradient along the normal, so the map stays a projection of
+    the face's own plane."""
+    n = len(points)
+    if n < 3 or len(uvs) < n:
+        return None, None
+    normal = polygon_normal(points)
+    e1 = None
+    for i in range(1, n):
+        d = sub(points[i], points[0])
+        d = sub(d, tuple(normal[k] * dot(d, normal) for k in range(3)))
+        if dot(d, d) > 1e-18:
+            e1 = normalize(d)
+            break
+    if e1 is None:
+        return None, None
+    e2 = cross(normal, e1)
+    o = points[0]
+    st = [(dot(sub(p, o), e1), dot(sub(p, o), e2)) for p in points[:n]]
+    # Normal equations of [s t 1]·[a b c] = target, 3×3.
+    sss = sum(s * s for s, _t in st)
+    stt = sum(s * t for s, t in st)
+    ttt = sum(t * t for _s, t in st)
+    ss1 = sum(s for s, _t in st)
+    tt1 = sum(t for _s, t in st)
+    m = [[sss, stt, ss1], [stt, ttt, tt1], [ss1, tt1, float(n)]]
+
+    def solve(rhs):
+        a = [row[:] + [r] for row, r in zip(m, rhs)]
+        for c in range(3):
+            piv = max(range(c, 3), key=lambda r: abs(a[r][c]))
+            if abs(a[piv][c]) < 1e-18:
+                return None
+            a[c], a[piv] = a[piv], a[c]
+            for r in range(3):
+                if r != c:
+                    f = a[r][c] / a[c][c]
+                    for k in range(c, 4):
+                        a[r][k] -= f * a[c][k]
+        return [a[r][3] / a[r][r] for r in range(3)]
+
+    out = []
+    for comp in (0, 1):
+        vals = [float(uv[comp]) for uv in uvs[:n]]
+        rhs = [sum(s * v for (s, _t), v in zip(st, vals)),
+               sum(t * v for (_s, t), v in zip(st, vals)),
+               sum(vals)]
+        abc = solve(rhs)
+        if abc is None:
+            return None, None
+        a, b, c = abc
+        g = tuple(a * e1[k] + b * e2[k] for k in range(3))
+        out += [g[0], g[1], g[2], c - dot(g, o)]
+    err = 0.0
+    for p, uv in zip(points, uvs):
+        u = out[0] * p[0] + out[1] * p[1] + out[2] * p[2] + out[3]
+        v = out[4] * p[0] + out[5] * p[1] + out[6] * p[2] + out[7]
+        err = max(err, math.hypot(u - uv[0], v - uv[1]))
+    return out, err
+
+
+def faces_at(scene: dict, src: str):
+    """The face list a mesh came from: ``loose``, ``proto/<i>`` or
+    ``g/<i>/<j>…`` (index path through groups and children)."""
+    if src == "loose":
+        return scene.get("faces")
+    kind, _sl, rest = src.partition("/")
+    try:
+        if kind == "proto":
+            return scene["protos"][int(rest)].get("faces")
+        if kind == "g":
+            node = None
+            items = scene.get("groups")
+            for i in rest.split("/"):
+                node = items[int(i)]
+                items = node.get("children") or []
+            return node.get("faces") if node is not None else None
+    except (KeyError, IndexError, ValueError, TypeError):
+        return None
+    return None
+
+
+def write_document(path, scene: dict) -> None:
+    """Save ``scene`` back into the ``.igz`` at ``path``, keeping everything
+    else (format, version, embedded textures) as it was. Written to a
+    temporary file and renamed over the old one, as IngeTrazo saves."""
+    import os
+    import tempfile
+    path = Path(path)
+    raw = path.read_bytes()
+    zipped = raw.startswith(_ZIP_MAGIC)
+    if zipped:
+        with zipfile.ZipFile(path) as zf:
+            data = json.loads(zf.read(_DOC_ENTRY).decode("utf-8"))
+            members = [(info, zf.read(info.filename)) for info in zf.infolist()]
+    else:
+        data = json.loads(raw.decode("utf-8"))
+    data["scene"] = scene
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    fd, tmp = tempfile.mkstemp(prefix=".ingetrazo-", suffix=".igz",
+                               dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            if zipped:
+                with zipfile.ZipFile(fh, "w") as out:
+                    for info, blob in members:
+                        if info.filename == _DOC_ENTRY:
+                            out.writestr(info, text.encode("utf-8"))
+                        else:
+                            out.writestr(info, blob)
+            else:
+                fh.write(text.encode("utf-8"))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def effective_attrs(face: dict, container: dict | None) -> dict:
     """What a face is drawn with inside a painted group (SketchUp's rule:
     the face's own paint wins; unpainted faces wear the container's)."""

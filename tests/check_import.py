@@ -293,5 +293,63 @@ for label, alpha_at_corner, want_link in (("opaque png", 1.0, False),
           f"{label}: alpha linked = {bool(b.inputs['Alpha'].links)}")
     print(f"{label}: alpha linked {bool(b.inputs['Alpha'].links)}")
 
+# Blender → IngeTrazo, the UVs (#2): turn the texture on whole faces, send
+# it, and the .igz carries it — a reload brings back the edited UVs, not
+# the old ones; a backup is kept; a .igz changed meanwhile is refused.
+import math  # noqa: E402
+from ingetrazo_io import writeback  # noqa: E402
+for path in docs:
+    tmp = Path(tempfile.mkdtemp()) / path.name
+    shutil.copy(path, tmp)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(tmp))
+    meshes = [m for m in bpy.data.meshes if m.get(build.SRC_PROP) and m.uv_layers.active
+              and m.attributes.get(build.FACE_ATTR)]
+    if not meshes:
+        continue
+    me = meshes[0]
+    attr, uvl = me.attributes[build.FACE_ATTR], me.uv_layers.active
+    a = math.radians(25.0)
+
+    def turned(u, v):
+        return (1.4 * (math.cos(a) * u - math.sin(a) * v) + 0.3,
+                1.4 * (math.sin(a) * u + math.cos(a) * v) - 0.2)
+    want = {}
+    for poly in me.polygons:
+        for li in poly.loop_indices:
+            uv = turned(*uvl.data[li].uv)
+            uvl.data[li].uv = uv
+            co = me.vertices[me.loops[li].vertex_index].co
+            want[(attr.data[poly.index].value, tuple(round(c, 4) for c in co))] = uv
+    stats = writeback.send_uvs(str(tmp))
+    check(stats["written"] > 0 and stats["max_error"] < 1e-5,
+          f"{path.name}: UVs not sent ({stats})")
+    check(Path(str(tmp) + ".bak").is_file(), f"{path.name}: no backup")
+    src = me[build.SRC_PROP]
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(tmp))
+    me2 = next(m for m in bpy.data.meshes if m.get(build.SRC_PROP) == src)
+    attr2, uvl2 = me2.attributes[build.FACE_ATTR], me2.uv_layers.active
+    worst = 0.0
+    for poly in me2.polygons:
+        for li in poly.loop_indices:
+            co = me2.vertices[me2.loops[li].vertex_index].co
+            k = (attr2.data[poly.index].value, tuple(round(c, 4) for c in co))
+            if k in want:
+                u, v = uvl2.data[li].uv
+                worst = max(worst, abs(u - want[k][0]), abs(v - want[k][1]))
+    check(worst < 1e-4, f"{path.name}: reload lost the sent UVs ({worst})")
+    # IngeTrazo saves meanwhile → refused, nothing written.
+    os.utime(tmp, (tmp.stat().st_atime, tmp.stat().st_mtime + 5))
+    before = tmp.read_bytes()
+    try:
+        writeback.send_uvs(str(tmp))
+        check(False, f"{path.name}: a changed .igz was overwritten")
+    except writeback.Changed:
+        pass
+    check(tmp.read_bytes() == before, f"{path.name}: refused, but the file changed")
+    print(f"{path.name}: UVs sent {stats}, reload keeps them (worst {worst:.1e})")
+    break
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

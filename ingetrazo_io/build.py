@@ -49,6 +49,15 @@ KEY_PROP = "ingetrazo_key"
 MTIME_PROP = "ingetrazo_mtime"
 DEFAULT_MATERIAL = "IngeTrazo por defecto"
 RIPPLES = "IngeTrazo ripples"
+#: Which IngeTrazo face each polygon came from (an INT face attribute), and
+#: where that face list lives in the document (a mesh property:
+#: ``loose``, ``proto/<i>`` or ``g/<i>/<j>…``) — what sending UVs back
+#: needs to find the face to write.
+FACE_ATTR = "ingetrazo_face"
+SRC_PROP = "ingetrazo_src"
+#: A recentred mesh's way back to IngeTrazo's coordinates (16 floats, row
+#: major): IngeTrazo point = origin @ Blender vertex.
+ORIGIN_PROP = "ingetrazo_origin"
 OPACITY = "IngeTrazo opacity"
 
 
@@ -311,7 +320,8 @@ class Builder:
             links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
 
     # ---- Meshes ----------------------------------------------------------------
-    def mesh(self, mjson: dict, container: dict | None, name: str):
+    def mesh(self, mjson: dict, container: dict | None, name: str,
+             src: str | None = None):
         """A mesh datablock for an IngeTrazo mesh, shared by every user of
         the same prototype and container paint (component copies)."""
         ckey = None
@@ -332,6 +342,7 @@ class Builder:
             return i
 
         faces: list = []
+        face_src: list = []
         face_mats: list = []
         face_uvs: list = []
         mat_slots: list = []
@@ -345,7 +356,7 @@ class Builder:
                 mat_slots.append(mat)
             return s
 
-        for f in mjson.get("faces", []) or []:
+        for f_index, f in enumerate(mjson.get("faces", []) or []):
             if f.get("hidden"):
                 continue
             outer = [tuple(p) for p in f.get("vertices", [])]
@@ -381,6 +392,7 @@ class Builder:
                 if len(idx) < 3 or len(set(idx)) != len(idx):
                     continue
                 faces.append(idx)
+                face_src.append(f_index)
                 face_mats.append(s)
                 face_uvs.append(igz.face_uvs(tex, normal, poly) if tex else None)
                 if holes:
@@ -428,6 +440,10 @@ class Builder:
             attr = me.attributes.get("sharp_edge") or \
                 me.attributes.new("sharp_edge", "BOOLEAN", "EDGE")
             attr.data.foreach_set("value", sharp)
+            if src is not None and len(face_src) == len(me.polygons):
+                fa = me.attributes.new(FACE_ATTR, "INT", "FACE")
+                fa.data.foreach_set("value", face_src)
+                me[SRC_PROP] = src
         me.update()
         me[DOC_PROP] = self.doc_path
         self.stats["faces"] += len(me.polygons)
@@ -484,23 +500,27 @@ class Builder:
         return obj
 
     def group(self, g: dict, key: str, root, parent=None,
-              container: dict | None = None, name_key: str | None = None):
+              container: dict | None = None, name_key: str | None = None,
+              ipath: tuple = ()):
         name = g.get("name") or "Grupo"
         paint = g.get("material") if isinstance(g.get("material"), dict) else None
         wear = paint or container
         if "proto" in g:
             try:
                 mjson = self.protos[int(g["proto"])]
+                src = f"proto/{int(g['proto'])}"
             except (IndexError, ValueError, TypeError):
-                mjson = {}
+                mjson, src = {}, None
         else:
             mjson = g
+            src = "g/" + "/".join(str(i) for i in ipath)
         billboard = g.get("billboard")
         matrix = igz.matrix_from_column_major(g["xform"]) if g.get("xform") else None
         if billboard is True:
             me, local = self.faceme_card(mjson, wear, name)
         else:
-            me = self.mesh(mjson, wear, name) if mjson.get("faces") or mjson.get("edges") else None
+            me = self.mesh(mjson, wear, name, src) \
+                if mjson.get("faces") or mjson.get("edges") else None
             if me is not None and not me.polygons and not me.edges:
                 me = None
             local = None
@@ -524,7 +544,8 @@ class Builder:
             obj["ingetrazo_billboard"] = str(billboard)
             self.facing.append(obj)
         for i, child, nk in self._named(g.get("children", []) or [], name_key or key):
-            self.group(child, self.key_for(child, f"{key}/{i}"), root, obj, wear, nk)
+            self.group(child, self.key_for(child, f"{key}/{i}"), root, obj, wear, nk,
+                       ipath + (i,))
         return obj
 
     def recentre(self, me, turn: bool = False):
@@ -550,6 +571,7 @@ class Builder:
                 m = m @ Matrix.Rotation(math.atan2(n.x, -n.y), 4, "Z")
         me.transform(m.inverted())
         me.update()
+        me[ORIGIN_PROP] = [m[r][c] for r in range(4) for c in range(4)]
         return m
 
     def faceme_card(self, mjson: dict, container, name: str):
@@ -755,10 +777,11 @@ class Builder:
         us.scale_length = 1.0
         loose = {"faces": s.get("faces", []), "edges": s.get("edges", [])}
         if loose["faces"] or loose["edges"]:
-            me = self.mesh(loose, None, self.doc.path.stem)
+            me = self.mesh(loose, None, self.doc.path.stem, src="loose")
             self.place("loose", self.doc.path.stem, me, root)
         for i, g, nk in self._named(s.get("groups", []) or [], "g"):
-            self.group(g, self.key_for(g, f"g/{i}"), root, name_key=nk)
+            self.group(g, self.key_for(g, f"g/{i}"), root, name_key=nk,
+                       ipath=(i,))
         self.cameras(root)
         self.lights(root)
         # EEVEE draws glass as an opaque sheet unless the scene ray-traces
