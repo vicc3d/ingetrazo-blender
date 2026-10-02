@@ -57,6 +57,30 @@ def _srgb_to_linear(c: float) -> float:
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
+_CUTOUT: dict = {}
+
+
+def _has_cutout(img) -> bool:
+    """Whether the picture has REAL transparency — some pixels see-through
+    — as IngeTrazo decides it (core.texture.image_has_cutout: a pixel
+    under 32/255 alpha). Cached per image."""
+    key = (img.name, img.filepath_raw, img.size[0], img.size[1])
+    got = _CUTOUT.get(key)
+    if got is not None:
+        return got
+    ok = False
+    if img.depth in (32, 64, 128) and img.size[0] and img.size[1]:
+        try:
+            import numpy as np
+            px = np.empty(img.size[0] * img.size[1] * 4, dtype=np.float32)
+            img.pixels.foreach_get(px)
+            ok = bool((px[3::4] < 32.0 / 255.0).any())
+        except (ImportError, RuntimeError, ValueError):
+            ok = True               # unreadable: keep the alpha, as before
+    _CUTOUT[key] = ok
+    return ok
+
+
 def _short(name: str, limit: int = 63) -> str:
     return name if len(name) <= limit else name[:limit]
 
@@ -192,10 +216,13 @@ class Builder:
             links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
         for n in [n for n in nodes if n.name.startswith(OPACITY)]:
             nodes.remove(n)
-        # Blender gives every image four channels: only a picture saved
-        # with transparency (a cut-out figure, leaves) has a real alpha.
-        # An opaque one wired in would cancel the face's opacity.
-        if img is not None and img.depth in (32, 64, 128):
+        # Blender gives every image four channels, and many opaque PNGs
+        # (concrete, brick) are saved with an alpha channel that is all
+        # opaque: only a picture with see-through pixels (a cut-out figure,
+        # leaves) drives the alpha. Wired in anyway it cancelled the face's
+        # opacity, and exporters (glTF, FBX → D5…) made the surface
+        # transparent.
+        if img is not None and _has_cutout(img):
             alpha = node.outputs["Alpha"]
             if opacity is not None and float(opacity) < 1.0:
                 mul = nodes.new("ShaderNodeMath")

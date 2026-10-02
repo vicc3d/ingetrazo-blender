@@ -271,10 +271,27 @@ for path in docs:
             if m.node_tree else None
         img = next((n.image for n in m.node_tree.nodes if n.type == "TEX_IMAGE"), None) \
             if m.node_tree else None
-        if b is None or img is None or img.depth in (32, 64, 128):
+        if b is None or img is None or build._has_cutout(img):
             continue
         check(not b.inputs["Alpha"].links,
               f"{path.name}: {m.name}: an opaque picture drives the alpha")
+
+# A PNG saved with an alpha channel that is all opaque (concrete, brick) is
+# NOT transparent: exported (glTF/FBX → D5) it came out see-through. Only a
+# picture with see-through pixels (a cut-out figure) drives the alpha.
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for label, alpha_at_corner, want_link in (("opaque png", 1.0, False),
+                                          ("cut-out png", 0.0, True)):
+    img = bpy.data.images.new(label, 8, 8, alpha=True)
+    px = [0.5, 0.5, 0.5, 1.0] * 64
+    px[3] = alpha_at_corner
+    img.pixels = px
+    m = bpy.data.materials.new(label)
+    build.Builder._paint(m, None, img, None)
+    b = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+    check(bool(b.inputs["Alpha"].links) == want_link,
+          f"{label}: alpha linked = {bool(b.inputs['Alpha'].links)}")
+    print(f"{label}: alpha linked {bool(b.inputs['Alpha'].links)}")
 
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
