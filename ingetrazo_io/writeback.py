@@ -45,10 +45,23 @@ def _root(doc_path: str):
     return None
 
 
-def send_uvs(doc_path: str) -> dict:
+def send_uvs(doc_path: str, own_paint: bool = False,
+             dry_run: bool = False) -> dict:
     """Write the UVs edited in Blender into the ``.igz`` at ``doc_path``.
-    Returns counts: ``written``, ``unchanged``, ``skipped_geometry``,
-    ``skipped_unpainted``, ``max_error`` (UV units, 0 = exact)."""
+
+    A face whose UVs changed but that wears its group's paint (it has no
+    texture of its own) gets its own copy of that paint, mapped as edited,
+    when ``own_paint`` — the face's own paint wins over the group's, as in
+    IngeTrazo — and is skipped otherwise. Never inside a component: its
+    faces are shared by every copy, which would all change.
+
+    ``dry_run`` counts without writing (what the dialog shows). Returns:
+    ``written`` (faces sent), ``own_paint`` (of those, given their own
+    paint), ``group_paint`` (changed, wear the group's paint, not sent),
+    ``component_paint`` (the same inside a component: never sent),
+    ``moved`` (reshaped in Blender: not sent), ``unchanged``, ``max_error``
+    (UV units, 0 = exact)."""
+    import json
     doc_path = str(Path(doc_path).resolve())
     root = _root(doc_path)
     if root is None:
@@ -62,9 +75,10 @@ def send_uvs(doc_path: str) -> dict:
         scene = doc.scene
     finally:
         doc.close()
-    stats = {"written": 0, "unchanged": 0, "skipped_geometry": 0,
-             "skipped_unpainted": 0, "max_error": 0.0}
-    done: set = set()                 # (src, face) already written
+    stats = {"written": 0, "own_paint": 0, "group_paint": 0,
+             "component_paint": 0, "moved": 0, "unchanged": 0,
+             "max_error": 0.0}
+    done: set = set()                 # (src, face) already handled
     for me in bpy.data.meshes:
         if me.get(build.DOC_PROP) != doc_path or not me.get(build.SRC_PROP):
             continue
@@ -77,6 +91,10 @@ def send_uvs(doc_path: str) -> dict:
         faces = igz.faces_at(scene, src)
         if not isinstance(faces, list):
             continue
+        try:
+            wear = json.loads(me.get(build.WEAR_PROP) or "{}")
+        except ValueError:
+            wear = {}
         origin = me.get(build.ORIGIN_PROP)
         to_it = Matrix([origin[r * 4:(r + 1) * 4] for r in range(4)]) \
             if origin is not None and len(origin) == 16 else Matrix.Identity(4)
@@ -95,30 +113,53 @@ def send_uvs(doc_path: str) -> dict:
                 continue
             face = faces[fi]
             tex = face.get("texture")
-            if not isinstance(tex, dict):
-                stats["skipped_unpainted"] += 1
-                continue
+            own = isinstance(tex, dict)
+            if not own:
+                if face.get("color") is not None:
+                    continue          # its own plain colour: no texture
+                tex = wear.get("texture")
+                if not isinstance(tex, dict):
+                    continue          # no texture at all: no UVs to keep
             outer = [tuple(p) for p in face.get("vertices", [])]
             corners = outer + [tuple(p) for h in face.get("holes", []) or [] for p in h]
             if len(outer) < 3 or any(
                     min((Vector(p) - Vector(c)).length for c in corners) > _SAME_POINT
                     for p in pts):
-                stats["skipped_geometry"] += 1
+                stats["moved"] += 1
                 continue
             now = igz.face_uvs(tex, igz.polygon_normal(outer), pts)
             if max(abs(a - b) for uv, cur in zip(uvs, now)
                    for a, b in zip(uv, cur)) < _SAME_UV:
                 stats["unchanged"] += 1
                 continue
+            if not own:
+                if src.startswith("proto/"):
+                    stats["component_paint"] += 1
+                    continue
+                if not own_paint:
+                    stats["group_paint"] += 1
+                    continue
             uvw, err = igz.fit_uvw(pts, uvs)
             if uvw is None:
-                stats["skipped_geometry"] += 1
+                stats["moved"] += 1
                 continue
-            tex["uvw"] = [round(x, 12) for x in uvw]
             done.add((src, fi))
             stats["written"] += 1
             stats["max_error"] = max(stats["max_error"], err)
-    if stats["written"]:
+            if dry_run:
+                if not own:
+                    stats["own_paint"] += 1
+                continue
+            if not own:
+                # The group's paint, as the face's own (its own paint wins).
+                tex = dict(tex)
+                face["texture"] = tex
+                for k in ("mat", "opacity"):
+                    if wear.get(k) is not None and face.get(k) is None:
+                        face[k] = wear[k]
+                stats["own_paint"] += 1
+            tex["uvw"] = [round(x, 12) for x in uvw]
+    if stats["written"] and not dry_run:
         shutil.copy2(doc_path, doc_path + ".bak")
         igz.write_document(doc_path, scene)
         # Our own save: the auto-reload must not take it for IngeTrazo's.

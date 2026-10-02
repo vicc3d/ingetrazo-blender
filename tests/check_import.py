@@ -351,5 +351,78 @@ for path in docs:
     print(f"{path.name}: UVs sent {stats}, reload keeps them (worst {worst:.1e})")
     break
 
+# A face that wears its GROUP's paint: not sent unless asked; asked, it gets
+# its own copy of the paint with the edited mapping. Never inside a
+# component (its faces are shared by every copy).
+import json as _json  # noqa: E402
+
+
+def paint_groups_instead(doc):
+    """Move the texture of a group's faces to the group's own paint (and
+    the same for one component copy), as painting the group in IngeTrazo."""
+    sc = doc["scene"]
+
+    def strip(faces):
+        tex = None
+        for f in faces or []:
+            if isinstance(f.get("texture"), dict):
+                tex = tex or {"texture": f["texture"], "mat": f.get("mat")}
+                f.pop("texture", None)
+                f.pop("mat", None)
+        return tex
+    done = {"g": False, "proto": False}
+
+    def walk(gs):
+        for g in gs or []:
+            if "proto" in g and not done["proto"]:
+                tex = strip(sc["protos"][int(g["proto"])].get("faces"))
+                if tex:
+                    g["material"] = {k: v for k, v in tex.items() if v is not None}
+                    done["proto"] = True
+            elif "proto" not in g and not done["g"] and not g.get("billboard") \
+                    and len(g.get("faces") or []) >= 2:
+                tex = strip(g.get("faces"))
+                if tex:
+                    g["material"] = {k: v for k, v in tex.items() if v is not None}
+                    done["g"] = True
+            walk(g.get("children"))
+    walk(sc.get("groups"))
+
+
+for path in docs:
+    tmp = Path(tempfile.mkdtemp()) / path.name
+    shutil.copy(path, tmp)
+    rewrite(tmp, paint_groups_instead)
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    build.import_igz(bpy.context, str(tmp))
+    worn = [m for m in bpy.data.meshes if m.get(build.WEAR_PROP)
+            and "texture" in _json.loads(m[build.WEAR_PROP])
+            and m.uv_layers.active and m.attributes.get(build.FACE_ATTR)]
+    group_meshes = [m for m in worn if str(m[build.SRC_PROP]).startswith("g/")]
+    comp_meshes = [m for m in worn if str(m[build.SRC_PROP]).startswith("proto/")]
+    if not group_meshes:
+        continue
+    for me in group_meshes + comp_meshes:
+        uvl = me.uv_layers.active
+        for d in uvl.data:
+            d.uv = (d.uv.x * 1.7 + 0.2, d.uv.y * 1.7)
+    st = writeback.send_uvs(str(tmp), own_paint=False, dry_run=True)
+    check(st["group_paint"] > 0, f"{path.name}: group-painted faces not noticed ({st})")
+    if comp_meshes:
+        check(st["component_paint"] > 0, f"{path.name}: component faces not noticed ({st})")
+    before = tmp.read_bytes()
+    check(tmp.read_bytes() == before, "a dry run wrote the file")
+    st = writeback.send_uvs(str(tmp), own_paint=True)
+    check(st["own_paint"] > 0 and st["max_error"] < 1e-5,
+          f"{path.name}: own paint not given ({st})")
+    doc = ingetrazo_io.igz.Document(tmp)
+    me = group_meshes[0]
+    faces = ingetrazo_io.igz.faces_at(doc.scene, me[build.SRC_PROP])
+    given = [f for f in faces if isinstance(f.get("texture"), dict) and f["texture"].get("uvw")]
+    doc.close()
+    check(given, f"{path.name}: no face carries its own mapped paint")
+    print(f"{path.name}: group paint → {st}")
+    break
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

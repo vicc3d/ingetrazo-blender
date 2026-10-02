@@ -51,8 +51,14 @@ shows its texture where you left it in Blender.
 - Move, rotate, scale, shear or unwrap a face's UVs: IngeTrazo holds that
   exactly (one flat map per face). Dragging single UV points out of shape is
   approximated.
-- A face that wears its group's paint is skipped: paint the face itself in
-  IngeTrazo first.
+- Before sending, a dialog says what will travel. A face that wears its
+  group's paint can get its own copy of that paint, mapped as you edited it
+  (its own paint then wins over the group's, as in IngeTrazo). Faces inside
+  a component are never changed that way, since every copy would change:
+  paint them inside the component in IngeTrazo.
+- IngeTrazo does not notice the new file by itself: close it there and
+  open it again. The dialog reminds you; *Don't show this again* hides the
+  reminder (back in the add-on's preferences).
 
 ## What comes across
 

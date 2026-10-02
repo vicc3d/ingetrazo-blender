@@ -77,6 +77,24 @@ class INGETRAZO_OT_reload(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class INGETRAZO_Preferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    remind_reopen: BoolProperty(
+        name="Remind me to reopen the file in IngeTrazo after sending UVs",
+        description="IngeTrazo does not notice the change by itself: the "
+                    "document has to be closed and opened again there",
+        default=True)
+
+    def draw(self, _context):
+        self.layout.prop(self, "remind_reopen")
+
+
+def _prefs(context):
+    addon = context.preferences.addons.get(__package__)
+    return addon.preferences if addon is not None else None
+
+
 class INGETRAZO_OT_send_uvs(bpy.types.Operator):
     """Write the texture mapping edited in Blender's UV editor into the
     .igz, so IngeTrazo shows it (a backup of the file is kept as .igz.bak)"""
@@ -85,15 +103,32 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     filepath: StringProperty()
+    own_paint: BoolProperty(
+        name="Give them their own copy of the group's paint",
+        description="The face keeps the same texture, now as its own paint, "
+                    "mapped as you edited it. Repainting the group in "
+                    "IngeTrazo will no longer change these faces",
+        default=True)
+    dont_remind: BoolProperty(name="Don't show this again", default=False)
+    # What the dialog shows (from a dry run).
+    n_own: bpy.props.IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    n_send: bpy.props.IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    n_component: bpy.props.IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    n_moved: bpy.props.IntProperty(options={"HIDDEN", "SKIP_SAVE"})
+    remind: BoolProperty(options={"HIDDEN", "SKIP_SAVE"})
 
-    def execute(self, context):
-        # UVs edited in Edit Mode live in the edit mesh: step out to Object
-        # Mode so the mesh holds them, and back in afterwards.
-        editing = context.mode == "EDIT_MESH"
-        if editing:
+    def _sync(self, context):
+        """UVs edited in Edit Mode live in the edit mesh: step out to
+        Object Mode so the mesh holds them. Returns whether to step back."""
+        if context.mode == "EDIT_MESH":
             bpy.ops.object.mode_set(mode="OBJECT")
+            return True
+        return False
+
+    def invoke(self, context, _event):
+        editing = self._sync(context)
         try:
-            st = writeback.send_uvs(self.filepath)
+            st = writeback.send_uvs(self.filepath, own_paint=True, dry_run=True)
         except writeback.Changed:
             self.report({"ERROR"}, "IngeTrazo: the .igz was saved in IngeTrazo "
                         "after it was loaded here. Reload first, then send.")
@@ -104,23 +139,78 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
         finally:
             if editing:
                 bpy.ops.object.mode_set(mode="EDIT")
-        notes = []
-        if st["skipped_unpainted"]:
-            notes.append(f"{st['skipped_unpainted']} take their texture from "
-                         "their group (paint the face itself in IngeTrazo)")
-        if st["skipped_geometry"]:
-            notes.append(f"{st['skipped_geometry']} were moved or reshaped in "
-                         "Blender (only UVs travel back)")
+        self.n_own = st["own_paint"]
+        self.n_send = st["written"] - st["own_paint"]
+        self.n_component = st["component_paint"]
+        self.n_moved = st["moved"]
+        prefs = _prefs(context)
+        self.remind = prefs is None or prefs.remind_reopen
+        if not st["written"] and not self.n_component and not self.n_moved:
+            self.report({"INFO"}, "IngeTrazo: no UV changes to send")
+            return {"CANCELLED"}
+        if self.n_own or self.n_component or self.n_moved or self.remind \
+                or not st["written"]:
+            return context.window_manager.invoke_props_dialog(
+                self, width=460, title="Send UVs to IngeTrazo",
+                confirm_text="Send" if st["written"] else "OK")
+        return self.execute(context)
+
+    def draw(self, _context):
+        col = self.layout.column(align=False)
+        name = os.path.basename(self.filepath)
+
+        def lines(box, icon, *texts):
+            for i, t in enumerate(texts):
+                box.label(text=t, icon=icon if i == 0 else "BLANK1")
+        if self.n_send:
+            lines(col, "CHECKMARK", f"{self.n_send} face(s) will be sent to {name}.")
+        if self.n_own:
+            box = col.box()
+            lines(box, "INFO", f"{self.n_own} edited face(s) take their texture",
+                  "from their group's paint.")
+            box.prop(self, "own_paint")
+        if self.n_component:
+            lines(col.box(), "ERROR",
+                  f"{self.n_component} edited face(s) take their component's paint.",
+                  "They are not sent: every copy would change.",
+                  "Paint them inside the component in IngeTrazo.")
+        if self.n_moved:
+            lines(col.box(), "ERROR",
+                  f"{self.n_moved} face(s) were moved or reshaped in Blender.",
+                  "Only UVs travel back, so they are not sent.")
+        if self.remind and (self.n_send or self.n_own):
+            box = col.box()
+            lines(box, "FILE_REFRESH", f"Then close {name} in IngeTrazo",
+                  "and open it again to see the new mapping.",
+                  f"A backup is kept as {name}.bak.")
+            box.prop(self, "dont_remind")
+
+    def execute(self, context):
+        if self.dont_remind:
+            prefs = _prefs(context)
+            if prefs is not None:
+                prefs.remind_reopen = False
+        editing = self._sync(context)
+        try:
+            st = writeback.send_uvs(self.filepath, own_paint=self.own_paint)
+        except writeback.Changed:
+            self.report({"ERROR"}, "IngeTrazo: the .igz was saved in IngeTrazo "
+                        "after it was loaded here. Reload first, then send.")
+            return {"CANCELLED"}
+        except (OSError, ValueError, KeyError) as exc:
+            self.report({"ERROR"}, f"IngeTrazo: {exc}")
+            return {"CANCELLED"}
+        finally:
+            if editing:
+                bpy.ops.object.mode_set(mode="EDIT")
         if not st["written"]:
-            msg = "IngeTrazo: no UV changes to send"
-        else:
-            msg = (f"IngeTrazo: UVs of {st['written']} face(s) sent — reopen "
-                   f"the file in IngeTrazo (backup: {os.path.basename(self.filepath)}.bak)")
-            if st["max_error"] > 1e-4:
-                msg += "; some edits were not flat-affine and were approximated"
-        if notes:
-            msg += ". Skipped: " + "; ".join(notes)
-        self.report({"WARNING"} if notes else {"INFO"}, msg)
+            self.report({"INFO"}, "IngeTrazo: nothing sent")
+            return {"FINISHED"}
+        msg = (f"IngeTrazo: UVs of {st['written']} face(s) sent to "
+               f"{os.path.basename(self.filepath)} — reopen it in IngeTrazo")
+        if st["max_error"] > 1e-4:
+            msg += " (some edits were approximated)"
+        self.report({"INFO"}, msg)
         return {"FINISHED"}
 
 
@@ -181,8 +271,8 @@ def _menu_import(self, _context):
     self.layout.operator(INGETRAZO_OT_import.bl_idname, text="IngeTrazo (.igz)")
 
 
-_classes = (INGETRAZO_OT_import, INGETRAZO_OT_reload, INGETRAZO_OT_send_uvs,
-            INGETRAZO_PT_panel)
+_classes = (INGETRAZO_Preferences, INGETRAZO_OT_import, INGETRAZO_OT_reload,
+            INGETRAZO_OT_send_uvs, INGETRAZO_PT_panel)
 
 
 def register():

@@ -58,6 +58,8 @@ SRC_PROP = "ingetrazo_src"
 #: A recentred mesh's way back to IngeTrazo's coordinates (16 floats, row
 #: major): IngeTrazo point = origin @ Blender vertex.
 ORIGIN_PROP = "ingetrazo_origin"
+#: The group paint a mesh's unpainted faces wear (JSON).
+WEAR_PROP = "ingetrazo_wear"
 OPACITY = "IngeTrazo opacity"
 
 
@@ -444,6 +446,13 @@ class Builder:
                 fa = me.attributes.new(FACE_ATTR, "INT", "FACE")
                 fa.data.foreach_set("value", face_src)
                 me[SRC_PROP] = src
+                if container:
+                    # The group paint unpainted faces wear: what a face gets
+                    # as its own copy when its UVs are sent back.
+                    import json
+                    me[WEAR_PROP] = json.dumps(
+                        {k: container[k] for k in ("texture", "color", "mat", "opacity")
+                         if container.get(k) is not None})
         me.update()
         me[DOC_PROP] = self.doc_path
         self.stats["faces"] += len(me.polygons)
