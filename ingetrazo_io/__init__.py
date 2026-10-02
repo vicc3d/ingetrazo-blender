@@ -159,28 +159,35 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
         col = self.layout.column(align=False)
         name = os.path.basename(self.filepath)
 
-        def lines(box, icon, *texts):
+        def faces(n):
+            return f"{n} face" if n == 1 else f"{n} faces"
+
+        def lines(parent, icon, *texts):
+            """A short paragraph: the lines close together, the icon on the
+            first one."""
+            para = parent.column(align=True)
+            para.scale_y = 0.8
             for i, t in enumerate(texts):
-                box.label(text=t, icon=icon if i == 0 else "BLANK1")
+                para.label(text=t, icon=icon if i == 0 else "BLANK1")
         if self.n_send:
-            lines(col, "CHECKMARK", f"{self.n_send} face(s) will be sent to {name}.")
+            lines(col, "CHECKMARK", f"{faces(self.n_send)} will be sent to {name}.")
         if self.n_own:
             box = col.box()
-            lines(box, "INFO", f"{self.n_own} edited face(s) take their texture",
+            lines(box, "INFO", f"{faces(self.n_own)} you edited take their texture",
                   "from their group's paint.")
             box.prop(self, "own_paint")
         if self.n_component:
             lines(col.box(), "ERROR",
-                  f"{self.n_component} edited face(s) take their component's paint.",
+                  f"{faces(self.n_component)} you edited take their component's paint.",
                   "They are not sent: every copy would change.",
                   "Paint them inside the component in IngeTrazo.")
         if self.n_moved:
             lines(col.box(), "ERROR",
-                  f"{self.n_moved} face(s) were moved or reshaped in Blender.",
+                  f"{faces(self.n_moved)} moved or reshaped in Blender.",
                   "Only UVs travel back, so they are not sent.")
         if self.remind and (self.n_send or self.n_own):
             box = col.box()
-            lines(box, "FILE_REFRESH", f"Then close {name} in IngeTrazo",
+            lines(box, "FILE_REFRESH", f"After sending, close {name} in IngeTrazo",
                   "and open it again to see the new mapping.",
                   f"A backup is kept as {name}.bak.")
             box.prop(self, "dont_remind")
@@ -206,7 +213,8 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
         if not st["written"]:
             self.report({"INFO"}, "IngeTrazo: nothing sent")
             return {"FINISHED"}
-        msg = (f"IngeTrazo: UVs of {st['written']} face(s) sent to "
+        n = st["written"]
+        msg = (f"IngeTrazo: UVs of {n} face{'' if n == 1 else 's'} sent to "
                f"{os.path.basename(self.filepath)} — reopen it in IngeTrazo")
         if st["max_error"] > 1e-4:
             msg += " (some edits were approximated)"
