@@ -16,6 +16,8 @@ No network, no server: the bridge is the `.igz` file itself.
 ![A spiral stair in IngeTrazo (left) and the same model in Blender, reloaded
 live with its components, cameras and face-me figure](docs/ingetrazo-to-blender.jpg)
 
+In Blender's extension list it appears as **IngeTrazo Sync (.igz)**.
+
 > Independent project, not affiliated with IngeTrazo's maintainers.
 
 ## Install
