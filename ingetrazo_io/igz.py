@@ -153,7 +153,7 @@ def fit_uvw(points, uvs):
     """The world→UV map ``[ux, uy, uz, uc, vx, vy, vz, vc]`` IngeTrazo
     stores as a face's ``texture["uvw"]``, fitted to UVs edited elsewhere
     (Blender's UV editor). ``(uvw, error)``: the least-squares fit over the
-    face's plane, and the largest UV distance it misses a point by — 0 for
+    face's plane, and the largest UV distance it misses a point by: 0 for
     anything affine (move, rotate, scale, shear, a planar unwrap), which is
     every edit IngeTrazo's map can hold exactly. ``(None, None)`` for a
     degenerate face.

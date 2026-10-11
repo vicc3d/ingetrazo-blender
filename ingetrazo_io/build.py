@@ -19,7 +19,7 @@ The mapping:
   packed into the .blend with IngeTrazo's exact UVs; a group's paint goes
   to its unpainted faces;
 - each material's finish (IngeTrazo 0.5.6+: matte, satin, gloss, metal,
-  glass, water — chosen, or guessed from the name) → its Principled BSDF,
+  glass, water; chosen, or guessed from the name) → its Principled BSDF,
   as IngeTrazo's own «Render with Blender» sets it (glass as a thin pane,
   and EEVEE's ray tracing on so it is seen through);
 - the lights of IngeTrazo's Render panel → point and spot lights;
@@ -51,8 +51,8 @@ DEFAULT_MATERIAL = "IngeTrazo por defecto"
 RIPPLES = "IngeTrazo ripples"
 #: Which IngeTrazo face each polygon came from (an INT face attribute), and
 #: where that face list lives in the document (a mesh property:
-#: ``loose``, ``proto/<i>`` or ``g/<i>/<j>…``) — what sending UVs back
-#: needs to find the face to write.
+#: ``loose``, ``proto/<i>`` or ``g/<i>/<j>…``). Sending UVs back needs both
+#: to find the face to write.
 FACE_ATTR = "ingetrazo_face"
 SRC_PROP = "ingetrazo_src"
 #: A recentred mesh's way back to IngeTrazo's coordinates (16 floats, row
@@ -72,8 +72,8 @@ _CUTOUT: dict = {}
 
 
 def _has_cutout(img) -> bool:
-    """Whether the picture has REAL transparency — some pixels see-through
-    — as IngeTrazo decides it (core.texture.image_has_cutout: a pixel
+    """Whether the picture has REAL transparency (some pixels see-through),
+    as IngeTrazo decides it (core.texture.image_has_cutout: a pixel
     under 32/255 alpha). Cached per image."""
     key = (img.name, img.filepath_raw, img.size[0], img.size[1])
     got = _CUTOUT.get(key)
@@ -464,7 +464,7 @@ class Builder:
         objs = [o for o in bpy.data.objects
                 if o.get(DOC_PROP) == self.doc_path and o.get(KEY_PROP)]
         # Second key: the path of names, for groups saved without a uid
-        # (documents older than the uid) — a first save that adds uids must
+        # (documents older than the uid). A first save that adds uids must
         # not recreate every object and drop the user's modifiers.
         self.old_by_name = {o["ingetrazo_name_key"]: o for o in objs
                             if o.get("ingetrazo_name_key")}
@@ -537,7 +537,7 @@ class Builder:
                 # A classic group's mesh sits in world coordinates: give the
                 # object its own origin (the bottom centre of the box, where
                 # SketchUp puts a group's axes) so it rotates and scales in
-                # place; a face-me also turns its sheet to face −Y.
+                # place; a face-me also turns its sheet to face -Y.
                 local = self.recentre(me, turn=bool(billboard))
         if local is not None:
             matrix = (Matrix(matrix) if matrix is not None else Matrix.Identity(4)) @ local
@@ -559,7 +559,7 @@ class Builder:
 
     def recentre(self, me, turn: bool = False):
         """Move ``me``'s origin to the bottom centre of its bounding box
-        (turning a face-me sheet so its front looks down −Y) and return the
+        (turning a face-me sheet so its front looks down -Y) and return the
         matrix that puts it back where it was. ``None`` for a shared mesh
         (component copies keep the component's own origin)."""
         if me.users or not me.vertices:
@@ -576,7 +576,7 @@ class Builder:
             n.z = 0.0
             if n.length > 1e-9:
                 n.normalize()
-                # R_z(phi) takes the sheet's −Y front onto the face normal.
+                # R_z(phi) takes the sheet's -Y front onto the face normal.
                 m = m @ Matrix.Rotation(math.atan2(n.x, -n.y), 4, "Z")
         me.transform(m.inverted())
         me.update()
@@ -586,8 +586,8 @@ class Builder:
     def faceme_card(self, mjson: dict, container, name: str):
         """A textured face-me figure (SketchUp's 2D people): IngeTrazo draws
         the image ONCE over the card's box, turned toward the camera. Built
-        the same way here — a card on the local XZ plane facing −Y, UVs 0..1,
-        origin at its foot — and the Locked Track added in :meth:`build`
+        the same way here (a card on the local XZ plane facing -Y, UVs 0..1,
+        origin at its foot), and the Locked Track added in :meth:`build`
         keeps it turned to the scene camera."""
         pts = [tuple(p) for f in mjson.get("faces", []) or [] for p in f.get("vertices", [])]
         face = next((f for f in mjson.get("faces", []) or []
@@ -612,8 +612,8 @@ class Builder:
 
     def key_for(self, g: dict, path_key: str) -> str:
         """The identity a reload finds a group's object by: its uid when the
-        document gives it one no other group shares — so a group moved into
-        or out of another keeps its object, modifiers and all — else its
+        document gives it one no other group shares, so a group moved into
+        or out of another keeps its object, modifiers and all; else its
         position in the tree."""
         uid = g.get("uid")
         if uid and self.uid_count.get(uid) == 1:
@@ -640,7 +640,7 @@ class Builder:
 
     def overview(self, root) -> dict | None:
         """An IngeTrazo-style view of the whole model: the default orbit
-        angles (yaw −45°, pitch 30°) at the distance that frames the
+        angles (yaw -45°, pitch 30°) at the distance that frames the
         bounding sphere of everything imported."""
         pts = []
         for obj in root.all_objects:
@@ -664,7 +664,7 @@ class Builder:
         home = self.scene_json.get("camera")
         if isinstance(home, dict):
             views.append(("camera", "Cámara IngeTrazo", home))
-        # Every file gets a view of the whole model — the first saved view
+        # Every file gets a view of the whole model: the first saved view
         # may frame a detail, or a spot the model has since moved from.
         self.context.view_layer.update()
         whole = self.overview(root)
@@ -690,8 +690,8 @@ class Builder:
                 obj.data.name = _short(name)
             self._aim(obj, v)
             first = first or obj
-        # The author's camera, else the first saved view, frames the render
-        # — unless the scene already has a camera of its own.
+        # The author's camera, else the first saved view, frames the render,
+        # unless the scene already has a camera of its own.
         if first is not None and self.context.scene.camera is None:
             self.context.scene.camera = first
 

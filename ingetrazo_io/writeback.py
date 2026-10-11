@@ -78,8 +78,8 @@ def send_uvs(doc_path: str, own_paint: bool = False,
 
     A face whose UVs changed but that wears its group's paint (it has no
     texture of its own) gets its own copy of that paint, mapped as edited,
-    when ``own_paint`` — the face's own paint wins over the group's, as in
-    IngeTrazo — and is skipped otherwise. Never inside a component: its
+    when ``own_paint`` (the face's own paint wins over the group's, as in
+    IngeTrazo), and is skipped otherwise. Never inside a component: its
     faces are shared by every copy, which would all change.
 
     ``dry_run`` counts without writing (what the dialog shows). Returns:

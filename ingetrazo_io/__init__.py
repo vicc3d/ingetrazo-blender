@@ -5,7 +5,7 @@
 File ▸ Import ▸ IngeTrazo (.igz) brings a document in with its groups,
 components, tags, materials, textures, soft edges and cameras. The
 IngeTrazo tab of the 3D view's sidebar (N) reloads it after you save again
-in IngeTrazo — by hand, or automatically whenever the file changes — keeping
+in IngeTrazo, by hand, or automatically whenever the file changes, keeping
 what you added in Blender. One thing travels back: **Send UVs** writes the
 texture mapping edited in Blender's UV editor into the .igz (writeback.py).
 
@@ -215,7 +215,7 @@ class INGETRAZO_OT_send_uvs(bpy.types.Operator):
             return {"FINISHED"}
         n = st["written"]
         msg = (f"IngeTrazo: UVs of {n} face{'' if n == 1 else 's'} sent to "
-               f"{os.path.basename(self.filepath)} — reopen it in IngeTrazo")
+               f"{os.path.basename(self.filepath)}; reopen it in IngeTrazo")
         if st["max_error"] > 1e-4:
             msg += " (some edits were approximated)"
         if st.get("backup"):
@@ -239,7 +239,7 @@ def _auto_reload():
         if mtime > float(coll.get(build.MTIME_PROP, 0.0)) + 1e-6:
             try:
                 build.import_igz(bpy.context, path)
-            except Exception as exc:  # noqa: BLE001 — a timer must not die
+            except Exception as exc:  # noqa: BLE001  (a timer must not die)
                 print(f"IngeTrazo: auto-reload of {path} failed: {exc}")
                 coll[build.MTIME_PROP] = mtime   # do not retry a broken save
     return 2.0
