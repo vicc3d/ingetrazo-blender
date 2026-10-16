@@ -6,7 +6,10 @@
 
 Pure Python (no ``bpy``, no Qt), so it can be tested on its own. A document
 is either plain JSON or a ZIP holding ``document.json`` plus the texture
-images under ``textures/`` (see ``formats/igz.py`` in IngeTrazo).
+images under ``textures/`` (see ``formats/igz.py`` in IngeTrazo). Large
+documents (format 3, IngeTrazo 0.5.8) keep their big meshes as binary blocks
+under ``geom/``: they are unpacked here into the same ``faces``/``edges``
+lists a JSON mesh has, and packed back by :func:`write_document`.
 
 Also here: IngeTrazo's texture projection, so every face gets exactly the
 UVs IngeTrazo draws it with (SketchUp's planar basis, tile size, rotation,
@@ -48,6 +51,15 @@ class Document:
         self.format = data.get("igz_format", 1)
         self.app_version = data.get("app_version", "")
         self.scene = data["scene"]
+        _expand_geometry(self.scene, self._read_member)
+
+    def _read_member(self, name: str) -> bytes:
+        if self._archive is None:
+            raise ValueError(f"{self.path.name}: a geometry block outside a container")
+        try:
+            return self._archive.read(name)
+        except KeyError:
+            raise ValueError(f"{self.path.name} lost its geometry block {name!r}") from None
 
     def close(self) -> None:
         if self._archive is not None:
@@ -74,6 +86,182 @@ class Document:
             except OSError:
                 pass
         return None
+
+
+# ---- Format 3: big meshes as binary blocks (IngeTrazo formats/igz.py) -----
+
+_GEOM_PREFIX = "geom/"
+#: The dtypes a block may declare; anything else is refused, as IngeTrazo
+#: does, so a crafted document cannot make the reader build other objects.
+_GEOM_DTYPES = frozenset(("<f4", "<i4", "<i8", "|u1"))
+#: Keys never walked looking for blocks: coordinate and element lists.
+_WALK_SKIP = frozenset(("faces", "edges", "vertices", "holes", "texture"))
+
+
+def _geom_meshes(node):
+    """Every mesh payload in ``node`` stored as a format-3 block."""
+    if isinstance(node, dict):
+        meta = node.get("geom")
+        if isinstance(meta, dict) and "arrays" in meta:
+            yield node
+        for key, value in node.items():
+            if key not in _WALK_SKIP and key != "geom":
+                yield from _geom_meshes(value)
+    elif isinstance(node, list):
+        for value in node:
+            if isinstance(value, (dict, list)):
+                yield from _geom_meshes(value)
+
+
+def geometry_arrays(meta, blob: bytes) -> dict:
+    """The arrays of a format-3 block, checked as IngeTrazo checks them
+    (``_geometry_arrays``): known dtypes, inside the blob, and every index
+    pointing at something that exists. ``ValueError`` otherwise."""
+    import numpy as np
+
+    def bad(why):
+        return ValueError(f"damaged geometry block ({why})")
+
+    layout = meta.get("arrays") if isinstance(meta, dict) else None
+    if not isinstance(layout, dict):
+        raise bad("no layout")
+    out = {}
+    for name, spec in layout.items():
+        try:
+            dtype, shape, offset = spec
+            shape = tuple(int(n) for n in shape)
+            offset = int(offset)
+        except (TypeError, ValueError):
+            raise bad(name) from None
+        if dtype not in _GEOM_DTYPES or offset < 0 or any(n < 0 for n in shape):
+            raise bad(name)
+        count = 1
+        for n in shape:
+            count *= n
+        if offset + count * np.dtype(dtype).itemsize > len(blob):
+            raise bad(name)
+        out[name] = np.frombuffer(blob, dtype=dtype, count=count,
+                                  offset=offset).reshape(shape)
+    for name in ("pos", "edges", "rings", "ring_sizes", "ring_counts",
+                 "face_attr", "edge_flags"):
+        if name not in out:
+            raise bad(f"missing {name}")
+    pos, edges = out["pos"], out["edges"]
+    if pos.ndim != 2 or pos.shape[1] != 3:
+        raise bad("pos")
+    if edges.ndim != 2 or edges.shape[1] != 2:
+        raise bad("edges")
+    for name in ("edges", "rings"):
+        a = out[name]
+        if a.size and (a.min() < 0 or a.max() >= len(pos)):
+            raise bad(name)
+    sizes, counts = out["ring_sizes"], out["ring_counts"]
+    if (sizes.size and sizes.min() < 1) or (counts.size and counts.min() < 1):
+        raise bad("rings")
+    if int(sizes.sum()) != len(out["rings"]) or int(counts.sum()) != len(sizes):
+        raise bad("rings")
+    fa = out["face_attr"]
+    n_attrs = len(meta.get("face_attrs") or ())
+    if len(fa) != len(counts) or (fa.size and (fa.min() < -1 or fa.max() >= n_attrs)):
+        raise bad("face_attr")
+    for name in ("edge_flags", "edge_curve", "edge_layer"):
+        if name in out and len(out[name]) != len(edges):
+            raise bad(name)
+    el = out.get("edge_layer")
+    if el is not None and el.size and (el.min() < -1
+                                       or el.max() >= len(meta.get("edge_layers") or ())):
+        raise bad("edge_layer")
+    return out
+
+
+def _expand_geometry(scene, read) -> None:
+    """Give every format-3 mesh in ``scene`` the ``faces`` and ``edges``
+    lists of a JSON mesh, in the same order (a face's index is the same in
+    both). ``read(member)`` returns a block's bytes. A face touching a
+    non-finite point keeps its place with no corners: IngeTrazo leaves it
+    out too."""
+    import numpy as np
+    for mesh in _geom_meshes(scene):
+        meta = mesh["geom"]
+        member = meta.get("member")
+        if not isinstance(member, str) or not member.startswith(_GEOM_PREFIX):
+            raise ValueError("damaged geometry block (member)")
+        a = geometry_arrays(meta, read(member))
+        pos_arr = a["pos"].astype(np.float64)
+        finite = np.isfinite(pos_arr).all(axis=1).tolist()
+        pos = pos_arr.tolist()
+        rings = a["rings"].tolist()
+        sizes = a["ring_sizes"].tolist()
+        table = meta.get("face_attrs") or []
+        faces = []
+        r = k = 0
+        for count, ai in zip(a["ring_counts"].tolist(), a["face_attr"].tolist()):
+            loops = []
+            for _ in range(count):
+                loops.append(rings[k:k + sizes[r]])
+                k += sizes[r]
+                r += 1
+            face = dict(table[ai]) if ai >= 0 else {}
+            if isinstance(face.get("texture"), dict):
+                face["texture"] = dict(face["texture"])   # its own, to edit
+            if all(finite[i] for loop in loops for i in loop):
+                face["vertices"] = [pos[i] for i in loops[0]]
+                if len(loops) > 1:
+                    face["holes"] = [[pos[i] for i in h] for h in loops[1:]]
+            else:
+                face["vertices"] = []
+            faces.append(face)
+        flags = a["edge_flags"].tolist()
+        curves = a["edge_curve"].tolist() if "edge_curve" in a else None
+        layers = a["edge_layer"].tolist() if "edge_layer" in a else None
+        layer_names = meta.get("edge_layers") or []
+        edges = []
+        for i, (v0, v1) in enumerate(a["edges"].tolist()):
+            if not (finite[v0] and finite[v1]):
+                continue
+            e = {"a": pos[v0], "b": pos[v1]}
+            if flags[i] & 1:
+                e["soft"] = True
+            if flags[i] & 2:
+                e["hidden"] = True
+            if curves is not None and curves[i] != -1:
+                e["curve"] = curves[i]
+            if layers is not None and layers[i] >= 0:
+                e["layer"] = layer_names[layers[i]]
+            edges.append(e)
+        mesh["faces"] = faces
+        mesh["edges"] = edges
+
+
+def _pack_face_attrs(mesh, blob: bytes) -> bytes:
+    """Fold the face attributes of an expanded format-3 mesh back into its
+    block: the shared table in the JSON and the per-face index in the blob.
+    Geometry is never written: only what a face wears can change here."""
+    import numpy as np
+    meta = mesh["geom"]
+    faces = mesh["faces"]
+    dtype, shape, offset = meta["arrays"]["face_attr"]
+    if len(faces) != int(shape[0]):
+        raise ValueError("the faces of a geometry block changed in number")
+    table = list(meta.get("face_attrs") or [])
+    index = {json.dumps(t, sort_keys=True, separators=(",", ":")): i
+             for i, t in enumerate(table)}
+    out = []
+    for f in faces:
+        attrs = {k: v for k, v in f.items() if k not in ("vertices", "holes")}
+        if not attrs:
+            out.append(-1)
+            continue
+        key = json.dumps(attrs, sort_keys=True, separators=(",", ":"))
+        i = index.get(key)
+        if i is None:
+            i = index[key] = len(table)
+            table.append(attrs)
+        out.append(i)
+    data = np.asarray(out, dtype=dtype).tobytes()
+    if table:
+        meta["face_attrs"] = table
+    return blob[:offset] + data + blob[offset + len(data):]
 
 
 # ---- Geometry helpers ---------------------------------------------------------
@@ -244,7 +432,11 @@ def faces_at(scene: dict, src: str):
 def write_document(path, scene: dict) -> None:
     """Save ``scene`` back into the ``.igz`` at ``path``, keeping everything
     else (format, version, embedded textures) as it was. Written to a
-    temporary file and renamed over the old one, as IngeTrazo saves."""
+    temporary file and renamed over the old one, as IngeTrazo saves.
+
+    A format-3 mesh goes back as its block: the ``faces``/``edges`` lists
+    unpacked on reading are left out of the JSON, and the face attributes
+    are folded into the block (the lists stay in ``scene``)."""
     import os
     import tempfile
     path = Path(path)
@@ -256,8 +448,29 @@ def write_document(path, scene: dict) -> None:
             members = [(info, zf.read(info.filename)) for info in zf.infolist()]
     else:
         data = json.loads(raw.decode("utf-8"))
-    data["scene"] = scene
-    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    blocks = list(_geom_meshes(scene))
+    if blocks and not zipped:
+        raise ValueError(f"{path.name}: a geometry block outside a container")
+    if zipped:
+        blobs = {info.filename: blob for info, blob in members}
+        for mesh in blocks:
+            name = mesh["geom"].get("member")
+            if name not in blobs:
+                raise ValueError(f"{path.name} lost its geometry block {name!r}")
+            if "faces" in mesh:
+                blobs[name] = _pack_face_attrs(mesh, blobs[name])
+        members = [(info, blobs[info.filename]) for info, _b in members]
+    hidden = [(mesh, mesh.pop("faces", None), mesh.pop("edges", None))
+              for mesh in blocks]
+    try:
+        data["scene"] = scene
+        text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    finally:
+        for mesh, faces, edges in hidden:
+            if faces is not None:
+                mesh["faces"] = faces
+            if edges is not None:
+                mesh["edges"] = edges
     fd, tmp = tempfile.mkstemp(prefix=".ingetrazo-", suffix=".igz",
                                dir=str(path.parent))
     try:

@@ -3,7 +3,7 @@
 A Blender 5 extension that imports [IngeTrazo](https://github.com/ingelibre/ingetrazo)
 documents (`.igz`) **with their structure** and reloads them when they
 change, so a model drawn in IngeTrazo can be lit, textured and rendered in
-Blender while you keep modelling in IngeTrazo — and that sends the **UV
+Blender while you keep modelling in IngeTrazo. It also sends the **UV
 mapping** you edit in Blender back into the `.igz`, so IngeTrazo shows the
 textures where you placed them.
 
@@ -22,6 +22,13 @@ In Blender's extension list it appears as **IngeTrazo Sync (.igz)**.
 
 ## Install
 
+From Blender: **Edit ▸ Preferences ▸ Get Extensions**, search for
+**IngeTrazo Sync** and click **Install**. It is listed on
+[extensions.blender.org](https://extensions.blender.org/add-ons/ingetrazo-io/),
+so Blender can update it from there too.
+
+Or by hand:
+
 1. Download `ingetrazo_io-<version>.zip` from the
    [Releases](../../releases) page (or build it, below).
 2. In Blender: **Edit ▸ Preferences ▸ Get Extensions ▸ ⌄ ▸ Install from Disk…**
@@ -33,7 +40,7 @@ Requires Blender **5.0** or newer (tested with 5.2.2 LTS).
 
 - **File ▸ Import ▸ IngeTrazo (.igz)**.
 - The **IngeTrazo** tab of the 3D view's sidebar (N) reloads a document after
-  you save it again in IngeTrazo — with **Reload**, or automatically with
+  you save it again in IngeTrazo, with **Reload**, or automatically with
   **Reload when the file changes**.
 - A reload updates what came from the file (geometry, placements, new and
   deleted groups, IngeTrazo's lights) and keeps what you added in Blender:
@@ -48,7 +55,7 @@ the mapping back: **Send UVs to IngeTrazo** in the IngeTrazo tab writes the
 UVs you edited into the `.igz`. Reopen the file in IngeTrazo and each face
 shows its texture where you left it in Blender.
 
-- Only the texture mapping travels back — never geometry.
+- Only the texture mapping travels back, never geometry.
 - It writes only if the `.igz` has not been saved in IngeTrazo since you
   loaded it here (otherwise: **Reload**, then send), and keeps a dated copy
   of the previous file beside it, `<name>.<date-time>.igz.bak` (the newest 10).
@@ -79,12 +86,13 @@ in IngeTrazo](docs/send-uvs-dialog.png)
 | soft edges | smooth shading, every other edge sharp |
 | paint, textures | materials (registry names), packed images, IngeTrazo's exact UVs |
 | face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
-| material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass is a thin pane you see through — the add-on turns on EEVEE's ray tracing for it — and water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
+| material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass is a thin pane you see through, for which the add-on turns on EEVEE's ray tracing, and water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
 | lights of the Render panel (0.5.6+) | point and spot lights in a *Luces* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
+| large documents (0.5.8+, the big meshes stored as binary blocks) | read like any other, checked as IngeTrazo checks them; Send UVs writes them back as blocks |
 | author's camera, saved views | cameras, plus a *Vista general* of the whole model |
 
 Not carried: dimensions, texts, section planes, sheets, and the Render
-panel's ambience (day sun, night, overcast) — light the world in Blender.
+panel's ambience (day sun, night, overcast): light the world in Blender.
 
 Materials imported with an earlier version of the add-on keep their old
 settings: use the material button next to Reload once to give them their
@@ -108,7 +116,8 @@ blender -b --factory-startup --python tests/check_import.py -- /path/to/ingetraz
 The add-on re-implements IngeTrazo's texture projection, camera maths, finish
 guessing and light rules;
 `tests/test_parity_with_ingetrazo.py` checks them against IngeTrazo's own
-code (needs an IngeTrazo checkout and its Python environment):
+code, and `tests/test_format3.py` checks that large documents read and
+write back as IngeTrazo reads them (needs an IngeTrazo checkout and its Python environment):
 
 ```bash
 INGETRAZO_SRC=/path/to/ingetrazo /path/to/ingetrazo/venv/bin/python -m pytest tests
@@ -116,7 +125,7 @@ INGETRAZO_SRC=/path/to/ingetrazo /path/to/ingetrazo/venv/bin/python -m pytest te
 
 ## Credits
 
-**Concept, UX/UI & Design** — [Victor Crespo](https://3dvic.com)
+**Concept, UX/UI & Design:** [Victor Crespo](https://3dvic.com)
 
 Developed with AI assistance (Claude). The texture projection, camera maths,
 material finishes and light rules are ported from [IngeTrazo](https://github.com/ingelibre/ingetrazo) by Marco
