@@ -42,7 +42,7 @@ for path in docs:
     check(meshes, f"{path.name}: no mesh objects")
     check(stats["faces"] > 0, f"{path.name}: no faces")
     check(bpy.context.scene.camera is not None, f"{path.name}: no active camera")
-    check(any(o.name == "Vista general" for o in ours), f"{path.name}: no overview")
+    check(any(o.name == "Overview" for o in ours), f"{path.name}: no overview")
     doc = ingetrazo_io.igz.Document(path)
     uses: dict = {}
 

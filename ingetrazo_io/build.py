@@ -53,7 +53,14 @@ from . import igz
 DOC_PROP = "ingetrazo_doc"
 KEY_PROP = "ingetrazo_key"
 MTIME_PROP = "ingetrazo_mtime"
-DEFAULT_MATERIAL = "IngeTrazo por defecto"
+DEFAULT_MATERIAL = "IngeTrazo default"
+#: Its name before 0.3.1, taken over on reload.
+_OLD_DEFAULT_MATERIAL = "IngeTrazo por defecto"
+#: The add-on's own collections (key → name), apart from the tags.
+OWN_COLLECTIONS = {"cameras": "Cameras", "lights": "Lights"}
+OWN_PROP = "ingetrazo_own"
+#: Their names before 0.3.1, when they were kept as tags.
+_OLD_OWN = {"Cámaras": "cameras", "Luces": "lights"}
 RIPPLES = "IngeTrazo ripples"
 #: The world as built (to tell whether it was edited here since), and the
 #: exposure last set (the same, for the scene's colour management).
@@ -140,6 +147,33 @@ class Builder:
         self.context.scene.collection.children.link(coll)
         return coll
 
+    def own_collection(self, root, key: str):
+        """The add-on's collection for its cameras or lights, kept apart
+        from the document's tags (a tag may be called «Lights» too)."""
+        for coll in root.children:
+            if coll.get(OWN_PROP) == key:
+                return coll
+        coll = bpy.data.collections.new(_short(f"{root.name} · {OWN_COLLECTIONS[key]}"))
+        coll[OWN_PROP] = key
+        coll[DOC_PROP] = self.doc_path
+        root.children.link(coll)
+        return coll
+
+    def adopt_old_collections(self, root) -> None:
+        """Scenes imported before 0.3.1 kept the cameras and lights in
+        collections named in Spanish, as if they were tags: they become the
+        add-on's own, in English. Only when they hold nothing but what the
+        add-on made there (a real tag with that name stays a tag)."""
+        ours = ("camera", "overview", "view/", "light/", "ambience/")
+        for coll in list(root.children):
+            key = _OLD_OWN.get(coll.get("ingetrazo_tag"))
+            if key is None or coll.children or not all(
+                    str(o.get(KEY_PROP, "")).startswith(ours) for o in coll.objects):
+                continue
+            del coll["ingetrazo_tag"]
+            coll[OWN_PROP] = key
+            coll.name = _short(f"{root.name} · {OWN_COLLECTIONS[key]}")
+
     def tag_collection(self, root, tag: str | None):
         if not tag:
             return root
@@ -196,6 +230,10 @@ class Builder:
             name = "IT #%02X%02X%02X" % tuple(int(round(c * 255)) for c in color[:3])
         else:
             name = DEFAULT_MATERIAL
+            old = bpy.data.materials.get(_OLD_DEFAULT_MATERIAL)
+            if old is not None and old.get(DOC_PROP) and \
+                    bpy.data.materials.get(DEFAULT_MATERIAL) is None:
+                old.name = DEFAULT_MATERIAL     # renamed in 0.3.1, edits kept
         if opacity is not None and float(opacity) < 1.0:
             name += f" {int(round(float(opacity) * 100))}%"
         name = _short(name)
@@ -678,17 +716,17 @@ class Builder:
         views = []
         home = self.scene_json.get("camera")
         if isinstance(home, dict):
-            views.append(("camera", "Cámara IngeTrazo", home))
+            views.append(("camera", "IngeTrazo camera", home))
         # Every file gets a view of the whole model: the first saved view
         # may frame a detail, or a spot the model has since moved from.
         self.context.view_layer.update()
         whole = self.overview(root)
         if whole is not None:
-            views.append(("overview", "Vista general", whole))
+            views.append(("overview", "Overview", whole))
         for i, v in enumerate(self.scene_json.get("saved_views", []) or []):
             if isinstance(v, dict):
-                views.append((f"view/{i}", v.get("name") or f"Vista {i + 1}", v))
-        coll = self.tag_collection(root, "Cámaras") if views else None
+                views.append((f"view/{i}", v.get("name") or f"View {i + 1}", v))
+        coll = self.own_collection(root, "cameras") if views else None
         first = None
         for key, name, v in views:
             obj = self.take(key, None)
@@ -757,10 +795,10 @@ class Builder:
         """The lights placed in IngeTrazo's Render panel, in real watts.
         One switched off there is kept here, hidden, ready to turn on."""
         found = fin.lights(self.scene_json)
-        coll = self.tag_collection(root, "Luces") if found else None
+        coll = self.own_collection(root, "lights") if found else None
         for i, lt in enumerate(found):
             kind = "SPOT" if lt["kind"] == "spot" else "POINT"
-            name = _short(lt["name"] or f"Luz {i + 1}")
+            name = _short(lt["name"] or f"Light {i + 1}")
             obj = self.take(f"light/{i}", None)
             if obj is not None and obj.type != "LIGHT":
                 bpy.data.objects.remove(obj)
@@ -800,10 +838,10 @@ class Builder:
         a = amb.ambience(self.scene_json)
         self.stats["ambience"] = a["ambience"]
         if a["sun"] is not None:
-            self.sun_lamp(root, "ambience/sun", "Sol", a["sun"],
+            self.sun_lamp(root, "ambience/sun", "Sun", a["sun"],
                           a["sun_strength"], (1.0, 1.0, 1.0), 0.53)
         elif a["ambience"] == "night":
-            self.sun_lamp(root, "ambience/moon", "Luna", (0.3, -0.4, 0.86),
+            self.sun_lamp(root, "ambience/moon", "Moon", (0.3, -0.4, 0.86),
                           0.08, (0.7, 0.8, 1.0), 1.0)
         self.world(a)
         self.exposure(a["exposure"])
@@ -818,7 +856,10 @@ class Builder:
             obj = bpy.data.objects.new(name, data)
             obj[DOC_PROP] = self.doc_path
             obj[KEY_PROP] = key
-            self.tag_collection(root, "Luces").objects.link(obj)
+            self.own_collection(root, "lights").objects.link(obj)
+        else:
+            obj.name = name
+            obj.data.name = name
         data = obj.data
         data.energy = energy
         data.color = color
@@ -910,6 +951,7 @@ class Builder:
     def build(self):
         s = self.scene_json
         root = self.root_collection()
+        self.adopt_old_collections(root)
         self.old = self.existing_objects()
         us = self.context.scene.unit_settings
         us.system = "METRIC"

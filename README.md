@@ -87,10 +87,10 @@ in IngeTrazo](docs/send-uvs-dialog.png)
 | paint, textures | materials (registry names), packed images, IngeTrazo's exact UVs |
 | face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
 | material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass is a thin pane you see through, for which the add-on turns on EEVEE's ray tracing, and water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
-| lights of the Render panel (0.5.6+) | point and spot lights in a *Luces* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
-| ambience of the Render panel (0.5.6+): day, night, overcast | by day a *Sol* lamp where IngeTrazo's Shadows panel puts the sun (the model's site, date, time and north, so shadows fall as in IngeTrazo) and a physical sky; at night a dark sky and a faint *Luna*; overcast, a bright even sky; and the exposure IngeTrazo renders with. The sky becomes the scene's world unless you already have your own (an HDRI stays), and once you edit it in Blender a reload leaves it alone |
+| lights of the Render panel (0.5.6+) | point and spot lights in a *Lights* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
+| ambience of the Render panel (0.5.6+): day, night, overcast | by day a *Sun* lamp where IngeTrazo's Shadows panel puts the sun (the model's site, date, time and north, so shadows fall as in IngeTrazo) and a physical sky; at night a dark sky and a faint *Moon*; overcast, a bright even sky; and the exposure IngeTrazo renders with. The sky becomes the scene's world unless you already have your own (an HDRI stays), and once you edit it in Blender a reload leaves it alone |
 | large documents (0.5.8+, the big meshes stored as binary blocks) | read like any other, checked as IngeTrazo checks them; Send UVs writes them back as blocks |
-| author's camera, saved views | cameras, plus a *Vista general* of the whole model |
+| author's camera, saved views | cameras, plus an *Overview* of the whole model |
 
 Not carried: dimensions, texts, section planes and sheets.
 
