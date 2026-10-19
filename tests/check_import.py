@@ -239,7 +239,21 @@ for m in mats:
         b = next(n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
         check(b.inputs["Thin Wall"].default_value, f"{m.name}: glass not a thin pane")
         check(bpy.context.scene.eevee.use_raytracing, "glass without EEVEE ray tracing")
-lamps = sorted((o for o in bpy.data.objects if o.type == "LIGHT"), key=lambda o: o.name)
+def panel_lamps():
+    """The Render panel's lights (the ambience's sun or moon apart)."""
+    return sorted((o for o in bpy.data.objects if o.type == "LIGHT"
+                   and not str(o.get(build.KEY_PROP, "")).startswith("ambience/")),
+                  key=lambda o: o.name)
+
+
+moon = [o for o in bpy.data.objects if o.get(build.KEY_PROP) == "ambience/moon"]
+world = bpy.context.scene.world
+check(len(moon) == 1 and moon[0].data.type == "SUN", f"{path.name}: night without its moon")
+check(world is not None and world.get(build.DOC_PROP)
+      and (Vector(world.color[:3]) - Vector(build.NIGHT_SKY)).length < 1e-6
+      and abs(bpy.context.scene.view_settings.exposure) < 1e-6,
+      f"{path.name}: the night sky or exposure")
+lamps = panel_lamps()
 check(sorted(o.data.type for o in lamps) == ["POINT", "SPOT"],
       f"{path.name}: lights {[o.data.type for o in lamps]}")
 if len(lamps) == 2:
@@ -254,12 +268,46 @@ LIGHTS[0]["pos"] = [3, 3, 3]
 del LIGHTS[1]
 rewrite(tmp, add_lights)
 bpy.ops.ingetrazo.reload(filepath=str(tmp))
-lamps = [o for o in bpy.data.objects if o.type == "LIGHT"]
+lamps = panel_lamps()
 check(len(lamps) == 1 and lamps[0].hide_render
       and tuple(lamps[0].location) == (3, 3, 3),
       f"{path.name}: reloaded lights {[(o.name, o.hide_render) for o in lamps]}")
 print(f"{path.name}: finishes {sorted({m['ingetrazo_finish'] for m in mats})}, "
       f"lights after reload {[(o.name, o.hide_render) for o in lamps]}")
+
+# The ambience: a day brings the sun of the Shadows panel (here IngeTrazo's
+# default site and date: Arequipa, 21 March at noon) and a sky; a reload to
+# overcast takes the sun away; a sky edited here survives a reload.
+def ambience_to(kind):
+    def edit(doc):
+        doc["scene"].setdefault("plugin_data", {})["render_blender"] = {
+            "ambience": kind, "lights": []}
+    return edit
+
+
+rewrite(tmp, ambience_to("day"))
+bpy.ops.ingetrazo.reload(filepath=str(tmp))
+sun = [o for o in bpy.data.objects if o.get(build.KEY_PROP) == "ambience/sun"]
+probe = ingetrazo_io.igz.Document(tmp)
+want = Vector(ingetrazo_io.ambience.sun_toward(probe.scene))
+probe.close()
+check(len(sun) == 1 and not [o for o in bpy.data.objects
+                             if o.get(build.KEY_PROP) == "ambience/moon"],
+      f"{path.name}: day without its sun, or with the moon")
+if sun:
+    got = sun[0].matrix_world.to_3x3() @ Vector((0, 0, 1))
+    check((got - want).length < 1e-5, f"{path.name}: the sun points {tuple(got)}")
+world = bpy.context.scene.world
+check(any(n.bl_idname == "ShaderNodeTexSky" for n in world.node_tree.nodes),
+      f"{path.name}: the day has no sky")
+bg = next(n for n in world.node_tree.nodes if n.bl_idname == "ShaderNodeBackground")
+bg.inputs["Strength"].default_value = 0.7      # edited by hand here
+rewrite(tmp, ambience_to("overcast"))
+bpy.ops.ingetrazo.reload(filepath=str(tmp))
+check(not [o for o in bpy.data.objects if str(o.get(build.KEY_PROP, "")).startswith("ambience/")],
+      f"{path.name}: overcast kept a sun or moon")
+check(bpy.context.scene.world == world and abs(bg.inputs["Strength"].default_value - 0.7) < 1e-6,
+      f"{path.name}: an edited sky was replaced")
 
 # A translucent paint on an opaque picture (IngeTrazo's water_calm 75%)
 # stays translucent: the picture's (opaque) alpha must not override it.

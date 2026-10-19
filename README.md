@@ -88,11 +88,14 @@ in IngeTrazo](docs/send-uvs-dialog.png)
 | face-me figures (2D people) | a card that turns to the scene camera (Locked Track) |
 | material finishes (0.5.6+): matte, satin, gloss, metal, glass, water | the Principled BSDF set as IngeTrazo's *Render with Blender* sets it (glass is a thin pane you see through, for which the add-on turns on EEVEE's ray tracing, and water ripples); a material with no finish chosen gets the one IngeTrazo guesses from its name |
 | lights of the Render panel (0.5.6+) | point and spot lights in a *Luces* collection, same watts, colour temperature and aim; one switched off in IngeTrazo is hidden |
+| ambience of the Render panel (0.5.6+): day, night, overcast | by day a *Sol* lamp where IngeTrazo's Shadows panel puts the sun (the model's site, date, time and north, so shadows fall as in IngeTrazo) and a physical sky; at night a dark sky and a faint *Luna*; overcast, a bright even sky; and the exposure IngeTrazo renders with. The sky becomes the scene's world unless you already have your own (an HDRI stays), and once you edit it in Blender a reload leaves it alone |
 | large documents (0.5.8+, the big meshes stored as binary blocks) | read like any other, checked as IngeTrazo checks them; Send UVs writes them back as blocks |
 | author's camera, saved views | cameras, plus a *Vista general* of the whole model |
 
-Not carried: dimensions, texts, section planes, sheets, and the Render
-panel's ambience (day sun, night, overcast): light the world in Blender.
+Not carried: dimensions, texts, section planes and sheets.
+
+The sky shows in **Rendered** view; in Material Preview, turn on *Scene
+World* in the shading popover to see it there too.
 
 Materials imported with an earlier version of the add-on keep their old
 settings: use the material button next to Reload once to give them their
@@ -116,7 +119,8 @@ blender -b --factory-startup --python tests/check_import.py -- /path/to/ingetraz
 The add-on re-implements IngeTrazo's texture projection, camera maths, finish
 guessing and light rules;
 `tests/test_parity_with_ingetrazo.py` checks them against IngeTrazo's own
-code, and `tests/test_format3.py` checks that large documents read and
+code, `tests/test_ambience.py` checks the sun against IngeTrazo's, and
+`tests/test_format3.py` checks that large documents read and
 write back as IngeTrazo reads them (needs an IngeTrazo checkout and its Python environment):
 
 ```bash

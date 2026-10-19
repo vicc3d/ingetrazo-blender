@@ -23,6 +23,11 @@ The mapping:
   as IngeTrazo's own «Render with Blender» sets it (glass as a thin pane,
   and EEVEE's ray tracing on so it is seen through);
 - the lights of IngeTrazo's Render panel → point and spot lights;
+- the Render panel's ambience → by day the sun of IngeTrazo's Shadows panel
+  (same site, date, time and north, so shadows fall as in IngeTrazo) and a
+  physical sky; at night a dark sky and a faint moon; overcast, a bright
+  even sky. The sky becomes the scene's world unless you set your own, and
+  is left alone once you edit it here;
 - the author's camera and every saved view → cameras.
 
 Everything created carries ``ingetrazo_doc`` / ``ingetrazo_key`` custom
@@ -41,6 +46,7 @@ import bpy
 from mathutils import Matrix, Vector
 from mathutils.geometry import tessellate_polygon
 
+from . import ambience as amb
 from . import finish as fin
 from . import igz
 
@@ -49,6 +55,15 @@ KEY_PROP = "ingetrazo_key"
 MTIME_PROP = "ingetrazo_mtime"
 DEFAULT_MATERIAL = "IngeTrazo por defecto"
 RIPPLES = "IngeTrazo ripples"
+#: The world as built (to tell whether it was edited here since), and the
+#: exposure last set (the same, for the scene's colour management).
+WORLD_SIG_PROP = "ingetrazo_world_sig"
+EXPOSURE_PROP = "ingetrazo_exposure"
+#: The skies IngeTrazo's Render with Blender tries, best first.
+SKY_TYPES = ("MULTIPLE_SCATTERING", "NISHITA", "SINGLE_SCATTERING",
+             "HOSEK_WILKIE", "PREETHAM")
+NIGHT_SKY = (0.010, 0.016, 0.035)
+OVERCAST_SKY = (0.62, 0.66, 0.70)
 #: Which IngeTrazo face each polygon came from (an INT face attribute), and
 #: where that face list lives in the document (a mesh property:
 #: ``loose``, ``proto/<i>`` or ``g/<i>/<j>…``). Sending UVs back needs both
@@ -776,6 +791,121 @@ class Builder:
             obj.hide_viewport = obj.hide_render = not lt["on"]
             self.stats["lights"] = self.stats.get("lights", 0) + 1
 
+    # ---- Ambience: sun or moon, sky and exposure ------------------------------
+    def ambience(self, root) -> None:
+        """The Render panel's ambience, as IngeTrazo's Render with Blender
+        builds it: a sun lamp by day where the Shadows panel puts the sun, a
+        faint cold moon at night, the sky as the scene's world, and the
+        exposure IngeTrazo renders with."""
+        a = amb.ambience(self.scene_json)
+        self.stats["ambience"] = a["ambience"]
+        if a["sun"] is not None:
+            self.sun_lamp(root, "ambience/sun", "Sol", a["sun"],
+                          a["sun_strength"], (1.0, 1.0, 1.0), 0.53)
+        elif a["ambience"] == "night":
+            self.sun_lamp(root, "ambience/moon", "Luna", (0.3, -0.4, 0.86),
+                          0.08, (0.7, 0.8, 1.0), 1.0)
+        self.world(a)
+        self.exposure(a["exposure"])
+
+    def sun_lamp(self, root, key, name, toward, energy, color, angle_deg):
+        obj = self.take(key, None)
+        if obj is not None and (obj.type != "LIGHT" or obj.data.type != "SUN"):
+            bpy.data.objects.remove(obj)
+            obj = None
+        if obj is None:
+            data = bpy.data.lights.new(name, type="SUN")
+            obj = bpy.data.objects.new(name, data)
+            obj[DOC_PROP] = self.doc_path
+            obj[KEY_PROP] = key
+            self.tag_collection(root, "Luces").objects.link(obj)
+        data = obj.data
+        data.energy = energy
+        data.color = color
+        data.angle = math.radians(angle_deg)
+        # A sun shines along its local -Z: point +Z at the sun. Where it
+        # stands does not matter; above the model it is easy to find.
+        rot = Vector(toward).normalized().to_track_quat("Z", "Y").to_matrix().to_4x4()
+        obj.matrix_world = Matrix.Translation((0.0, 0.0, 10.0)) @ rot
+
+    def world(self, a: dict) -> None:
+        scene = self.context.scene
+        world = scene.world
+        if world is not None:
+            if world.get(DOC_PROP) is None:
+                if not _plain_default_world(world):
+                    return                    # your own sky (an HDRI…)
+                world = None
+            elif world.get(DOC_PROP) != self.doc_path:
+                return                        # another document's
+            elif world.get(WORLD_SIG_PROP) != _world_sig(world):
+                return                        # edited here: yours now
+        if world is None:
+            world = bpy.data.worlds.new(_short(f"IngeTrazo · {self.doc.path.stem}"))
+            world[DOC_PROP] = self.doc_path
+        if hasattr(world, "use_nodes"):       # gone in Blender 6: always on
+            world.use_nodes = True
+        nodes, links = world.node_tree.nodes, world.node_tree.links
+        nodes.clear()
+        out = nodes.new("ShaderNodeOutputWorld")
+        out.location = (300, 0)
+        bg = nodes.new("ShaderNodeBackground")
+        links.new(bg.outputs["Background"], out.inputs["Surface"])
+        if a["ambience"] == "day":
+            sky = nodes.new("ShaderNodeTexSky")
+            sky.location = (-300, 0)
+            chosen = None
+            for kind in SKY_TYPES:
+                try:
+                    sky.sky_type = kind
+                    chosen = kind
+                    break
+                except (TypeError, ValueError):
+                    continue
+            if a["sun"] is not None:
+                d = Vector(a["sun"]).normalized()
+                elevation = math.asin(max(-1.0, min(1.0, d.z)))
+                rotation = math.atan2(d.x, d.y)     # from +Y (north), clockwise
+                for attr, value in (("sun_elevation", elevation),
+                                    ("sun_rotation", -rotation + math.pi / 2)):
+                    if hasattr(sky, attr):
+                        setattr(sky, attr, value)
+                if hasattr(sky, "sun_direction"):
+                    sky.sun_direction = d
+            if hasattr(sky, "sun_disc"):
+                sky.sun_disc = False                # the Sun lamp is the sun
+            links.new(sky.outputs["Color"], bg.inputs["Color"])
+            bg.inputs["Strength"].default_value = (
+                0.12 if chosen in SKY_TYPES[:3] else 0.6)
+        else:
+            color = NIGHT_SKY if a["ambience"] == "night" else OVERCAST_SKY
+            bg.inputs["Color"].default_value = (*color, 1.0)
+            bg.inputs["Strength"].default_value = 1.0
+        world.color = NIGHT_SKY if a["ambience"] == "night" else OVERCAST_SKY
+        scene.world = world
+        world[WORLD_SIG_PROP] = _world_sig(world)
+
+    def exposure(self, value: float) -> None:
+        """IngeTrazo's exposure for the ambience, and its punchier AgX look,
+        unless the scene's colour management was set by hand."""
+        scene = self.context.scene
+        view = scene.view_settings
+        last = scene.get(EXPOSURE_PROP)
+        if last is None:
+            if abs(view.exposure) > 1e-6:
+                return                        # set by hand before importing
+            if view.look == "None":
+                for look in ("AgX - Medium High Contrast", "Medium High Contrast"):
+                    try:
+                        view.look = look
+                        break
+                    except TypeError:
+                        continue
+        elif abs(view.exposure - float(last)) > 1e-4:
+            return                            # changed here since
+        view.exposure = value
+        scene[EXPOSURE_PROP] = value
+
     # ---- The whole document ------------------------------------------------------
     def build(self):
         s = self.scene_json
@@ -793,6 +923,7 @@ class Builder:
                        ipath=(i,))
         self.cameras(root)
         self.lights(root)
+        self.ambience(root)
         # EEVEE draws glass as an opaque sheet unless the scene ray-traces
         # (off by default): a model with glass turns it on.
         ee = getattr(self.context.scene, "eevee", None)
@@ -834,6 +965,49 @@ class Builder:
                     root[f"ingetrazo_{k}"] = geo[k]
         root[MTIME_PROP] = os.path.getmtime(self.doc.path)
         return root
+
+
+def _plain_default_world(world) -> bool:
+    """Blender's own grey world, untouched: a Background with nothing
+    plugged in (or no nodes at all). Anything else is the user's sky."""
+    tree = world.node_tree
+    if tree is None or not getattr(world, "use_nodes", True):
+        return True
+    for node in tree.nodes:
+        if node.bl_idname not in ("ShaderNodeBackground", "ShaderNodeOutputWorld"):
+            return False
+        if node.bl_idname == "ShaderNodeBackground" and any(
+                i.is_linked for i in node.inputs):
+            return False
+    return True
+
+
+def _world_sig(world) -> str:
+    """A fingerprint of a world's nodes, settings and links: equal to the
+    one stored when built means nobody has edited it since."""
+    def val(v):
+        if isinstance(v, (str, bool)):
+            return v
+        try:
+            return tuple(round(float(x), 5) for x in v)
+        except TypeError:
+            return round(float(v), 5) if isinstance(v, (int, float)) else str(v)
+    tree = world.node_tree
+    parts = [val(world.color)]
+    for node in sorted(tree.nodes, key=lambda n: n.name) if tree else []:
+        parts.append((node.name, node.bl_idname))
+        for attr in ("sky_type", "sun_elevation", "sun_rotation", "sun_disc",
+                     "sun_direction", "sun_size", "sun_intensity", "altitude",
+                     "air_density", "aerosol_density", "ozone_density"):
+            if hasattr(node, attr):
+                parts.append((attr, val(getattr(node, attr))))
+        for sock in node.inputs:
+            if not sock.is_linked and hasattr(sock, "default_value"):
+                parts.append((sock.identifier, val(sock.default_value)))
+    for link in tree.links if tree else []:
+        parts.append((link.from_node.name, link.from_socket.identifier,
+                      link.to_node.name, link.to_socket.identifier))
+    return repr(parts)
 
 
 def import_igz(context, path, update_materials: bool = False) -> dict:
