@@ -477,5 +477,34 @@ for path in docs:
     print(f"{path.name}: group paint → {st}")
     break
 
+# Several documents in one scene: one sky, one sun, one exposure, the
+# first document's while it is there; once it is removed, the next one to
+# reload takes over (and the removed one's sun goes).
+work = Path(tempfile.mkdtemp())
+day, night, grey = work / "day.igz", work / "night.igz", work / "grey.igz"
+for p, kind in ((day, "day"), (night, "night"), (grey, "overcast")):
+    shutil.copy(docs[0], p)
+    rewrite(p, ambience_to(kind))
+bpy.ops.wm.read_factory_settings(use_empty=True)
+build.import_igz(bpy.context, str(day))
+first = bpy.context.scene.world
+build.import_igz(bpy.context, str(night))
+build.import_igz(bpy.context, str(grey))
+amb_objs = lambda: sorted(o.get(build.KEY_PROP) for o in bpy.data.objects
+                          if str(o.get(build.KEY_PROP, "")).startswith("ambience/"))
+check(bpy.context.scene.world == first
+      and abs(bpy.context.scene.view_settings.exposure - (-0.6)) < 1e-5,
+      "a later document took over the first one's sky or exposure")
+check(amb_objs() == ["ambience/sun"], f"one sun only, the first's: {amb_objs()}")
+for c in [c for c in bpy.data.collections if c.get(build.DOC_PROP) == str(day.resolve())]:
+    bpy.data.collections.remove(c)        # objects stay, as in the Outliner
+build.import_igz(bpy.context, str(grey))
+check(amb_objs() == [], f"the removed document's sun stayed: {amb_objs()}")
+w = bpy.context.scene.world
+check(w is not None and w.get(build.DOC_PROP) == str(grey.resolve())
+      and not any(n.bl_idname == "ShaderNodeTexSky" for n in w.node_tree.nodes)
+      and abs(bpy.context.scene.view_settings.exposure - (-0.3)) < 1e-5,
+      "with the first document gone, the other one did not take the sky")
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

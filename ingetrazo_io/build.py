@@ -66,6 +66,9 @@ RIPPLES = "IngeTrazo ripples"
 #: exposure last set (the same, for the scene's colour management).
 WORLD_SIG_PROP = "ingetrazo_world_sig"
 EXPOSURE_PROP = "ingetrazo_exposure"
+#: Which document leads the scene's ambience: a scene has one sky, one sun
+#: and one exposure, so they stay the first document's while it is there.
+AMBIENCE_DOC_PROP = "ingetrazo_ambience_doc"
 #: The skies IngeTrazo's Render with Blender tries, best first.
 SKY_TYPES = ("MULTIPLE_SCATTERING", "NISHITA", "SINGLE_SCATTERING",
              "HOSEK_WILKIE", "PREETHAM")
@@ -835,6 +838,18 @@ class Builder:
         builds it: a sun lamp by day where the Shadows panel puts the sun, a
         faint cold moon at night, the sky as the scene's world, and the
         exposure IngeTrazo renders with."""
+        scene = self.context.scene
+        # (Scenes from 0.3.0 and 0.3.1 did not record it: the sky's document.)
+        owner = scene.get(AMBIENCE_DOC_PROP) or (
+            scene.world.get(DOC_PROP) if scene.world is not None else None)
+        if owner and owner != self.doc_path:
+            if _doc_in_scene(owner):
+                return        # another document leads: no sun or moon here
+            # Its document was removed: its sun or moon goes with it.
+            for obj in [o for o in bpy.data.objects if o.get(DOC_PROP) == owner
+                        and str(o.get(KEY_PROP, "")).startswith("ambience/")]:
+                bpy.data.objects.remove(obj)
+        scene[AMBIENCE_DOC_PROP] = self.doc_path
         a = amb.ambience(self.scene_json)
         self.stats["ambience"] = a["ambience"]
         if a["sun"] is not None:
@@ -877,10 +892,12 @@ class Builder:
                 if not _plain_default_world(world):
                     return                    # your own sky (an HDRI…)
                 world = None
-            elif world.get(DOC_PROP) != self.doc_path:
-                return                        # another document's
             elif world.get(WORLD_SIG_PROP) != _world_sig(world):
                 return                        # edited here: yours now
+            elif world.get(DOC_PROP) != self.doc_path:
+                if _doc_in_scene(world.get(DOC_PROP)):
+                    return                    # another document's
+                world[DOC_PROP] = self.doc_path   # its document was removed
         if world is None:
             world = bpy.data.worlds.new(_short(f"IngeTrazo · {self.doc.path.stem}"))
             world[DOC_PROP] = self.doc_path
@@ -1007,6 +1024,14 @@ class Builder:
                     root[f"ingetrazo_{k}"] = geo[k]
         root[MTIME_PROP] = os.path.getmtime(self.doc.path)
         return root
+
+
+def _doc_in_scene(doc_path) -> bool:
+    """Whether a document imported here is still in the file (its
+    collection was not deleted)."""
+    return bool(doc_path) and any(
+        c.get(DOC_PROP) == doc_path and c.get(MTIME_PROP) is not None
+        for c in bpy.data.collections)
 
 
 def _plain_default_world(world) -> bool:
