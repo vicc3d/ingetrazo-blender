@@ -86,6 +86,12 @@ ORIGIN_PROP = "ingetrazo_origin"
 #: The group paint a mesh's unpainted faces wear (JSON).
 WEAR_PROP = "ingetrazo_wear"
 OPACITY = "IngeTrazo opacity"
+#: A camera of yours sent to IngeTrazo as a scene: the document, the
+#: scene's name, and its camera as sent (igz.view_sig). On reload that
+#: camera stands for the scene, so no copy of it appears among ours.
+SCENE_DOC_PROP = "ingetrazo_scene_doc"
+SCENE_PROP = "ingetrazo_scene"
+SCENE_SIG_PROP = "ingetrazo_scene_sig"
 
 
 def _srgb_to_linear(c: float) -> float:
@@ -730,8 +736,23 @@ class Builder:
             if isinstance(v, dict):
                 views.append((f"view/{i}", v.get("name") or f"View {i + 1}", v))
         coll = self.own_collection(root, "cameras") if views else None
+        sent = {o[SCENE_PROP]: o for o in bpy.data.objects
+                if o.type == "CAMERA" and o.get(SCENE_PROP)
+                and o.get(SCENE_DOC_PROP) == self.doc_path}
         first = None
         for key, name, v in views:
+            mine = sent.get(name) if key.startswith("view/") else None
+            if mine is not None and mine.get(KEY_PROP) != key:
+                # A scene sent from one of your cameras: that camera stands
+                # for it. It follows the scene only when IngeTrazo changed
+                # it since; otherwise it keeps what IngeTrazo cannot hold
+                # (a roll, a sideways lens shift).
+                sig = igz.view_sig(v)
+                if mine.get(KEY_PROP) is None and mine.get(SCENE_SIG_PROP) != sig:
+                    self._aim(mine, v)
+                    mine[SCENE_SIG_PROP] = sig
+                first = first or mine
+                continue
             obj = self.take(key, None)
             if obj is None:
                 cam = bpy.data.cameras.new(_short(name))
@@ -774,14 +795,11 @@ class Builder:
         level = Vector((f.x, f.y, 0.0))
         if two_point and level.length > 0.05:
             # Two-point perspective: a level camera, the target brought back
-            # to the centre with lens shift (verticals stay vertical).
+            # to the centre with lens shift (verticals stay vertical). With
+            # the sensor fitted vertically, the shift counts in frame heights.
             level.normalize()
             slope = math.atan2(f.z, math.hypot(f.x, f.y))
-            r = self.context.scene.render
-            aspect = (r.resolution_x * r.pixel_aspect_x) / max(
-                1, r.resolution_y * r.pixel_aspect_y)
-            cam.shift_y = math.tan(slope) / (2.0 * math.tan(math.radians(fov) / 2.0)) \
-                / max(1.0, aspect)
+            cam.shift_y = math.tan(slope) / (2.0 * math.tan(math.radians(fov) / 2.0))
             f = level
         up = Vector((0.0, 0.0, 1.0))
         if abs(f.dot(up)) > 0.9999:

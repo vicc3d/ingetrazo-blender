@@ -517,3 +517,38 @@ def camera_eye(view: dict):
     cp, sp = math.cos(pitch), math.sin(pitch)
     return (t[0] + d * cp * math.cos(yaw), t[1] + d * cp * math.sin(yaw),
             t[2] + d * sp)
+
+
+def view_sig(view: dict) -> str:
+    """The camera of a scene as a short text. Two equal ones mean the same
+    camera, so a camera sent from Blender can tell whether IngeTrazo
+    changed its scene since."""
+    t = view.get("target") or (0.0, 0.0, 0.0)
+    fov = view.get("fov", view.get("fov_deg", 45.0))
+    return repr([round(float(x), 4) for x in t] + [
+        round(float(view.get("distance", 20.0)), 4),
+        round(float(view.get("yaw", -math.pi / 4)), 5),
+        round(float(view.get("pitch", math.pi / 6)), 5),
+        round(float(fov), 4), bool(view.get("parallel")),
+        bool(view.get("two_point"))])
+
+
+def set_view_camera(view: dict, cam: dict) -> None:
+    """Give the scene ``view`` the camera ``cam`` (target, distance, yaw,
+    pitch, fov, parallel, two_point), written the way IngeTrazo writes it
+    (``core/saved_views.py``): the field of view only when it is not 45°,
+    the two switches only when on. Everything else the scene remembers
+    (layers, style, section, shadows, hidden objects) stays as it was."""
+    view["target"] = [round(float(x), 9) for x in cam["target"]]
+    for k in ("distance", "yaw", "pitch"):
+        view[k] = round(float(cam[k]), 12)
+    view.pop("fov_deg", None)
+    if abs(float(cam["fov"]) - 45.0) > 1e-9:
+        view["fov"] = round(float(cam["fov"]), 9)
+    else:
+        view.pop("fov", None)
+    for k in ("parallel", "two_point"):
+        if cam.get(k):
+            view[k] = True
+        else:
+            view.pop(k, None)

@@ -3,9 +3,10 @@
 A Blender 5 extension that imports [IngeTrazo](https://github.com/ingelibre/ingetrazo)
 documents (`.igz`) **with their structure** and reloads them when they
 change, so a model drawn in IngeTrazo can be lit, textured and rendered in
-Blender while you keep modelling in IngeTrazo. It also sends the **UV
-mapping** you edit in Blender back into the `.igz`, so IngeTrazo shows the
-textures where you placed them.
+Blender while you keep modelling in IngeTrazo. It also sends two things
+back into the `.igz`: the **UV mapping** you edit in Blender, so IngeTrazo
+shows the textures where you placed them, and the **cameras** you frame in
+Blender, as scenes of the document.
 
 It complements IngeTrazo's own *Render with Blender* tab (which renders
 from inside IngeTrazo): this one works from inside Blender, keeps groups,
@@ -73,6 +74,30 @@ in IngeTrazo](docs/send-uvs-dialog.png)
 - IngeTrazo does not notice the new file by itself: close it there and
   open it again. The dialog reminds you; *Don't show this again* hides the
   reminder (back in the add-on's preferences).
+
+## Send cameras back to IngeTrazo
+
+Frame a view in Blender and keep it as a scene in IngeTrazo: select the
+cameras and press **Send cameras to IngeTrazo** in the IngeTrazo tab (with
+none selected, the scene's camera goes).
+
+- A camera imported from a scene updates that scene. Any other camera
+  becomes a new scene named after it, or updates the scene with its name.
+  A scene that already exists only changes its camera: its layers, style,
+  section and hidden objects stay as they were.
+- Perspective, orthographic and two point perspective (a level camera with
+  vertical lens shift) come across as IngeTrazo's perspective, parallel and
+  two point views, with the same field of view and framing.
+- IngeTrazo cameras have no roll, so a camera tilted sideways arrives
+  level; a sideways lens shift, or one on a tilted camera, is not kept
+  either, and the scene aims at the middle of the frame instead. The dialog
+  points these out before sending.
+- A camera you sent stands for its scene: a reload does not bring a copy of
+  it, and leaves it as you placed it unless the scene was changed in
+  IngeTrazo since.
+- The same safety as for UVs: only when the `.igz` has not been saved in
+  IngeTrazo since you loaded it, a dated backup beside it, and IngeTrazo
+  shows the scenes once you open the file again there.
 
 ## What comes across
 

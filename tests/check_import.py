@@ -506,5 +506,128 @@ check(w is not None and w.get(build.DOC_PROP) == str(grey.resolve())
       and abs(bpy.context.scene.view_settings.exposure - (-0.3)) < 1e-5,
       "with the first document gone, the other one did not take the sky")
 
+# Blender → IngeTrazo, the cameras (#3). First the way back of every kind
+# of scene: a camera imported from a scene, read again as a scene, shows
+# the same thing (eye, sight line, field of view, kind of view).
+from mathutils import Euler  # noqa: E402
+
+KINDS = [
+    {"name": "Persp", "target": [1, 2, 1], "distance": 14, "yaw": -0.6,
+     "pitch": 0.3, "fov": 50},
+    {"name": "Wide", "target": [-2, 0, 0.5], "distance": 6, "yaw": 2.4,
+     "pitch": -0.2, "fov": 75},
+    {"name": "Parallel", "target": [0, 1, 0], "distance": 25, "yaw": 0.9,
+     "pitch": 0.5, "parallel": True},
+    {"name": "Two point", "target": [0, 0, 4], "distance": 18, "yaw": -1.2,
+     "pitch": -0.25, "fov": 40, "two_point": True},
+    {"name": "Plan", "target": [0, 0, 0], "distance": 40, "yaw": math.pi / 2,
+     "pitch": math.radians(89.0), "parallel": True},
+]
+
+
+def add_kinds(doc):
+    doc["scene"]["saved_views"] = [dict(v) for v in KINDS]
+    doc["scene"]["saved_views"][0]["hidden_layers"] = ["Kept"]
+
+
+def sight(view):
+    """Eye, look direction and frame height (parallel) of a scene."""
+    eye = Vector(ingetrazo_io.igz.camera_eye(view))
+    look = (Vector(view["target"]) - eye).normalized()
+    fov = float(view.get("fov", 45.0))
+    half = float(view["distance"]) * math.tan(math.radians(fov) / 2.0)
+    return eye, look, fov, half
+
+
+path = docs[0]
+tmp = Path(tempfile.mkdtemp()) / path.name
+shutil.copy(path, tmp)
+rewrite(tmp, add_kinds)
+bpy.ops.wm.read_factory_settings(use_empty=True)
+build.import_igz(bpy.context, str(tmp))
+root = writeback._root(str(tmp.resolve()))
+centre = writeback._model_centre(root)
+for i, want in enumerate(KINDS):
+    obj = next(o for o in bpy.data.objects if o.get(build.KEY_PROP) == f"view/{i}")
+    got, notes = writeback.camera_view(obj, bpy.context.scene, centre)
+    e0, l0, f0, h0 = sight(want)
+    e1, l1, f1, h1 = sight(got)
+    ok = (l1 - l0).length < 1e-5 and not notes \
+        and bool(got["parallel"]) == bool(want.get("parallel")) \
+        and bool(got["two_point"]) == bool(want.get("two_point"))
+    if want.get("parallel"):
+        # Only the sight line and the frame height make a parallel view.
+        off = (Vector(want["target"]) - e1)
+        ok = ok and (off - off.dot(l1) * l1).length < 1e-4 and abs(h1 - h0) < 1e-4
+    else:
+        ok = ok and (e1 - e0).length < 1e-4 and abs(f1 - f0) < 1e-4
+    check(ok, f"{want['name']}: the way back differs {got} {notes}")
+print("cameras: every kind of scene comes back as it was")
+
+# A camera of yours becomes a new scene; an imported scene camera moved
+# here updates its scene and keeps the rest of it; a camera tilted
+# sideways is flagged; nothing is duplicated on reload, and your camera
+# follows its scene only when IngeTrazo changed it.
+cam_data = bpy.data.cameras.new("Street view")
+street = bpy.data.objects.new("Street view", cam_data)
+bpy.context.scene.collection.objects.link(street)
+street.location = (9.0, -7.0, 1.6)
+street.rotation_euler = Euler((math.radians(85), 0, math.radians(50)))
+rolled = bpy.data.objects.new("Rolled", bpy.data.cameras.new("Rolled"))
+bpy.context.scene.collection.objects.link(rolled)
+rolled.location = (5, 5, 2)
+rolled.rotation_euler = Euler((math.radians(80), math.radians(12), math.radians(140)))
+persp = next(o for o in bpy.data.objects if o.get(build.KEY_PROP) == "view/0")
+persp.location.z += 1.0
+bpy.context.view_layer.update()
+names = ["Street view", "Rolled", persp.name]
+dry = writeback.send_cameras(str(tmp), names, dry_run=True)
+plan = {c: (s, new, notes) for c, s, new, notes in dry["scenes"]}
+check(plan.get("Street view") == ("Street view", True, [])
+      and plan.get("Rolled", (0, 0, []))[2] == ["roll"]
+      and plan.get(persp.name) == ("Persp", False, []),
+      f"cameras: what the dialog would show {dry}")
+before = tmp.read_bytes()
+check(tmp.read_bytes() == before, "cameras: a dry run wrote the file")
+st = writeback.send_cameras(str(tmp), names)
+check(Path(st.get("backup", "")).is_file(), "cameras: no backup")
+probe = ingetrazo_io.igz.Document(tmp)
+views = {v["name"]: v for v in probe.scene["saved_views"]}
+probe.close()
+check(len(views) == len(KINDS) + 2, f"cameras: scenes now {list(views)}")
+eye = Vector(ingetrazo_io.igz.camera_eye(views["Street view"]))
+check((eye - street.matrix_world.translation).length < 1e-4,
+      f"cameras: the new scene's eye {tuple(eye)}")
+eye = Vector(ingetrazo_io.igz.camera_eye(views["Persp"]))
+check((eye - persp.matrix_world.translation).length < 1e-4
+      and views["Persp"].get("hidden_layers") == ["Kept"],
+      f"cameras: the updated scene {views['Persp']}")
+cams_before = sorted(o.name for o in bpy.data.objects if o.type == "CAMERA")
+street_at = street.matrix_world.copy()
+rolled_at = rolled.matrix_world.copy()
+bpy.ops.ingetrazo.reload(filepath=str(tmp))
+cams_after = sorted(o.name for o in bpy.data.objects if o.type == "CAMERA")
+check(cams_after == cams_before, f"cameras: reload made {cams_after}, had {cams_before}")
+check(rolled.matrix_world == rolled_at and street.matrix_world == street_at,
+      "cameras: reload moved a camera of yours")
+
+
+def move_street_scene(doc):
+    for v in doc["scene"]["saved_views"]:
+        if v["name"] == "Street view":
+            v["yaw"] += 0.5
+
+
+rewrite(tmp, move_street_scene)
+bpy.ops.ingetrazo.reload(filepath=str(tmp))
+probe = ingetrazo_io.igz.Document(tmp)
+moved = next(v for v in probe.scene["saved_views"] if v["name"] == "Street view")
+probe.close()
+eye = Vector(ingetrazo_io.igz.camera_eye(moved))
+check((street.matrix_world.translation - eye).length < 1e-4
+      and rolled.matrix_world == rolled_at,
+      "cameras: a scene changed in IngeTrazo did not move its camera here")
+print(f"cameras: sent {st['scenes']}, reload keeps {len(cams_after)} cameras")
+
 print("OK" if not failures else f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

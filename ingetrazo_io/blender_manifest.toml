@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "ingetrazo_io"
-version = "0.3.2"
+version = "0.4.0"
 name = "IngeTrazo Sync (.igz)"
-tagline = "Import IngeTrazo documents, reload them, send UVs back"
+tagline = "Import and reload IngeTrazo documents, send UVs and cameras back"
 maintainer = "Victor Crespo (3dvic.com · github.com/vicc3d)"
 type = "add-on"
 website = "https://github.com/vicc3d/ingetrazo-blender"
